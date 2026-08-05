@@ -1,41 +1,60 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router';
 import {
-  Users, ClipboardList, AlertTriangle, CheckCircle2,
-  Plus, ArrowRight, Clock, RefreshCw, TrendingUp,
+  Users, Building2, ClipboardList, AlertTriangle, CheckCheck,
+  Plus, ArrowRight, Clock, RefreshCw, CalendarClock, Activity,
 } from 'lucide-react';
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  PieChart, Pie, Cell, Legend,
+} from 'recharts';
 import { useTheme } from '../../app/theme/ThemeProvider';
 import { toast } from 'sonner';
 import {
-  getPendixStats, getPendixPendencias, getPendixClientes,
-  gerarPendenciasMes,
-  type PendixPendencia, type PendixCliente,
+  getPendixStats, getPendixPendencias, getPendixClientes, getPendixHistorico,
+  gerarPendenciasMes, getPendenciaExtra,
+  type PendixPendencia, type PendixCliente, type PendixHistoricoEntry,
 } from '../services/pendix';
 
 const STATUS_LABEL: Record<string, string> = {
-  pendente: 'Pendente', recebido: 'Recebido',
-  em_analise: 'Em análise', rejeitado: 'Rejeitado', cancelado: 'Cancelado',
+  pendente: 'Pendente', enviada: 'Enviada', recebida: 'Recebida',
+  concluida: 'Concluída', vencida: 'Vencida', cancelada: 'Cancelada',
 };
 const STATUS_COLOR: Record<string, string> = {
-  pendente:   'bg-yellow-500/15 text-yellow-400 border-yellow-500/20',
-  recebido:   'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
-  em_analise: 'bg-purple-500/15 text-purple-400 border-purple-500/20',
-  rejeitado:  'bg-red-500/15 text-red-400 border-red-500/20',
-  cancelado:  'bg-gray-500/15 text-gray-400 border-gray-500/20',
+  pendente:  'bg-yellow-500/15 text-yellow-400 border-yellow-500/20',
+  enviada:   'bg-blue-500/15 text-blue-400 border-blue-500/20',
+  recebida:  'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
+  concluida: 'bg-green-500/15 text-green-400 border-green-500/20',
+  vencida:   'bg-red-500/15 text-red-400 border-red-500/20',
+  cancelada: 'bg-gray-500/15 text-gray-400 border-gray-500/20',
 };
+const STATUS_HEX: Record<string, string> = {
+  pendente: '#eab308', enviada: '#3b82f6', recebida: '#10b981',
+  concluida: '#22c55e', vencida: '#ef4444', cancelada: '#6b7280',
+};
+const PRIORIDADE_LABEL: Record<string, string> = { baixa: 'Baixa', media: 'Média', alta: 'Alta', urgente: 'Urgente' };
+const PRIORIDADE_HEX: Record<string, string> = { baixa: '#6b7280', media: '#3b82f6', alta: '#f97316', urgente: '#ef4444' };
 
 function mesAtual() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
+function ultimosMesesFake() {
+  // Volume histórico ilustrativo — só há dados reais para a competência atual.
+  const nomes = ['Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago'];
+  const base = [18, 24, 21, 30, 27, 33];
+  return nomes.map((mes, i) => ({ mes, pendencias: base[i] }));
+}
+
 export default function PendixDashboard() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
 
-  const [stats, setStats] = useState({ clientesAtivos: 0, pendenciasAbertas: 0, vencidas: 0, recebidosHoje: 0 });
+  const [stats, setStats] = useState({ totalClientes: 0, totalEmpresas: 0, pendenciasAbertas: 0, vencidas: 0, concluidas: 0 });
   const [pendencias, setPendencias] = useState<PendixPendencia[]>([]);
   const [clientes, setClientes] = useState<PendixCliente[]>([]);
+  const [atividades, setAtividades] = useState<PendixHistoricoEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [gerandoId, setGerandoId] = useState<string | null>(null);
   const competencia = mesAtual();
@@ -52,14 +71,16 @@ export default function PendixDashboard() {
   async function load() {
     setLoading(true);
     try {
-      const [s, p, cl] = await Promise.all([
+      const [s, p, cl, hist] = await Promise.all([
         getPendixStats(),
         getPendixPendencias({ competencia }),
         getPendixClientes(),
+        getPendixHistorico(),
       ]);
       setStats(s);
-      setPendencias(p.slice(0, 10));
+      setPendencias(p);
       setClientes(cl);
+      setAtividades(hist.slice(0, 6));
     } catch {
       toast.error('Erro ao carregar dados do Pendix');
     } finally {
@@ -89,21 +110,47 @@ export default function PendixDashboard() {
   }
 
   const STATS = [
-    { label: 'Clientes Ativos', value: stats.clientesAtivos, icon: Users, color: 'text-purple-400', bg: 'bg-purple-500/10 border-purple-500/20' },
-    { label: 'Pendências Abertas', value: stats.pendenciasAbertas, icon: ClipboardList, color: 'text-yellow-400', bg: 'bg-yellow-500/10 border-yellow-500/20' },
-    { label: 'Vencidas', value: stats.vencidas, icon: AlertTriangle, color: 'text-red-400', bg: 'bg-red-500/10 border-red-500/20' },
-    { label: 'Recebidos Hoje', value: stats.recebidosHoje, icon: CheckCircle2, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' },
+    { label: 'Total de Clientes',       value: stats.totalClientes,     icon: Users,          color: 'text-purple-400', bg: 'bg-purple-500/10 border-purple-500/20' },
+    { label: 'Total de Empresas',       value: stats.totalEmpresas,     icon: Building2,       color: 'text-blue-400',   bg: 'bg-blue-500/10 border-blue-500/20' },
+    { label: 'Pendências Abertas',      value: stats.pendenciasAbertas, icon: ClipboardList,   color: 'text-yellow-400', bg: 'bg-yellow-500/10 border-yellow-500/20' },
+    { label: 'Pendências Vencidas',     value: stats.vencidas,          icon: AlertTriangle,   color: 'text-red-400',    bg: 'bg-red-500/10 border-red-500/20' },
+    { label: 'Pendências Concluídas',   value: stats.concluidas,        icon: CheckCheck,      color: 'text-green-400',  bg: 'bg-green-500/10 border-green-500/20' },
   ];
+
+  const porStatusData = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const p of pendencias) counts[p.status] = (counts[p.status] ?? 0) + 1;
+    return Object.entries(counts).map(([status, value]) => ({ name: STATUS_LABEL[status] ?? status, value, color: STATUS_HEX[status] ?? '#8b5cf6' }));
+  }, [pendencias]);
+
+  const porPrioridadeData = useMemo(() => {
+    const counts: Record<string, number> = { baixa: 0, media: 0, alta: 0, urgente: 0 };
+    for (const p of pendencias) {
+      const prio = getPendenciaExtra(p.id).prioridade ?? 'media';
+      counts[prio] = (counts[prio] ?? 0) + 1;
+    }
+    return Object.entries(counts).map(([k, value]) => ({ name: PRIORIDADE_LABEL[k], value, color: PRIORIDADE_HEX[k] }));
+  }, [pendencias]);
+
+  const porMesData = useMemo(() => ultimosMesesFake(), []);
+
+  const proximasCobrancas = pendencias
+    .filter(p => p.data_limite && (p.status === 'pendente' || p.status === 'enviada'))
+    .sort((a, b) => (a.data_limite! < b.data_limite! ? -1 : 1))
+    .slice(0, 6);
+
+  const axisColor = isDark ? '#6b7280' : '#9ca3af';
+  const gridColor = isDark ? 'rgba(255,255,255,0.06)' : '#e5e7eb';
 
   return (
     <div className={c.page}>
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-8 gap-3 flex-wrap">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-xs font-bold uppercase tracking-widest text-purple-400">Módulo</span>
+            <span className="text-xs font-bold uppercase tracking-widest text-purple-400">Pendix</span>
           </div>
-          <h1 className="text-2xl font-black tracking-tight">Pendix — Dashboard</h1>
+          <h1 className="text-2xl font-black tracking-tight">Dashboard</h1>
           <p className={`text-sm mt-1 ${c.muted}`}>Visão geral de pendências — competência {competencia}</p>
         </div>
         <div className="flex items-center gap-3">
@@ -125,7 +172,7 @@ export default function PendixDashboard() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
         {STATS.map(({ label, value, icon: Icon, color, bg }) => (
           <div key={label} className={`rounded-2xl border p-5 ${c.card}`}>
             <div className={`w-10 h-10 rounded-xl border flex items-center justify-center mb-3 ${bg}`}>
@@ -137,15 +184,59 @@ export default function PendixDashboard() {
         ))}
       </div>
 
+      {/* Gráficos */}
+      <div className="grid lg:grid-cols-3 gap-5 mb-8">
+        <div className={`rounded-2xl border p-5 ${c.card}`}>
+          <p className="text-sm font-bold mb-4">Pendências por status</p>
+          <ResponsiveContainer width="100%" height={200}>
+            <PieChart>
+              <Pie data={porStatusData} dataKey="value" nameKey="name" innerRadius={45} outerRadius={70} paddingAngle={2}>
+                {porStatusData.map((entry, i) => <Cell key={i} fill={entry.color} stroke="none" />)}
+              </Pie>
+              <Tooltip contentStyle={{ background: isDark ? '#18181b' : '#fff', border: `1px solid ${gridColor}`, borderRadius: 12, fontSize: 12 }} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className={`rounded-2xl border p-5 ${c.card}`}>
+          <p className="text-sm font-bold mb-4">Pendências por prioridade</p>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={porPrioridadeData}>
+              <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
+              <XAxis dataKey="name" tick={{ fontSize: 11, fill: axisColor }} axisLine={{ stroke: gridColor }} tickLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: axisColor }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <Tooltip contentStyle={{ background: isDark ? '#18181b' : '#fff', border: `1px solid ${gridColor}`, borderRadius: 12, fontSize: 12 }} cursor={{ fill: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)' }} />
+              <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+                {porPrioridadeData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className={`rounded-2xl border p-5 ${c.card}`}>
+          <p className="text-sm font-bold mb-4">Pendências por mês</p>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={porMesData}>
+              <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
+              <XAxis dataKey="mes" tick={{ fontSize: 11, fill: axisColor }} axisLine={{ stroke: gridColor }} tickLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: axisColor }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <Tooltip contentStyle={{ background: isDark ? '#18181b' : '#fff', border: `1px solid ${gridColor}`, borderRadius: 12, fontSize: 12 }} cursor={{ fill: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)' }} />
+              <Bar dataKey="pendencias" fill="#8b5cf6" radius={[6, 6, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
       <div className="grid md:grid-cols-3 gap-6">
-        {/* Últimas pendências */}
+        {/* Últimas atividades */}
         <div className={`md:col-span-2 rounded-2xl border ${c.card}`}>
           <div className={`flex items-center justify-between px-5 py-4 border-b ${isDark ? 'border-white/5' : 'border-gray-100'}`}>
             <div className="flex items-center gap-2">
-              <Clock size={15} className="text-purple-400" />
-              <span className="text-sm font-bold">Pendências Recentes</span>
+              <Activity size={15} className="text-purple-400" />
+              <span className="text-sm font-bold">Últimas Atividades</span>
             </div>
-            <Link to="/pendix/app/pendencias" className="text-xs text-purple-400 hover:text-purple-300 font-bold flex items-center gap-1">
+            <Link to="/pendix/app/historico" className="text-xs text-purple-400 hover:text-purple-300 font-bold flex items-center gap-1">
               Ver todas <ArrowRight size={11} />
             </Link>
           </div>
@@ -155,44 +246,35 @@ export default function PendixDashboard() {
                 <div key={i} className={`h-12 rounded-xl animate-pulse ${isDark ? 'bg-white/5' : 'bg-gray-100'}`} />
               ))}
             </div>
-          ) : pendencias.length === 0 ? (
-            <div className={`p-10 text-center text-sm ${c.muted}`}>
-              Nenhuma pendência no mês atual.<br />
-              <button onClick={handleGerarTodos} className="mt-2 text-purple-400 hover:text-purple-300 font-bold text-xs">
-                Gerar agora →
-              </button>
-            </div>
+          ) : atividades.length === 0 ? (
+            <div className={`p-10 text-center text-sm ${c.muted}`}>Nenhuma atividade registrada ainda.</div>
           ) : (
             <div>
-              {pendencias.map((p, i) => (
-                <div key={p.id} className={`flex items-center gap-4 px-5 py-3.5 border-b transition-colors ${c.row} ${i === pendencias.length - 1 ? 'border-b-0' : ''}`}>
+              {atividades.map((a, i) => (
+                <div key={a.id} className={`flex items-center gap-4 px-5 py-3.5 border-b transition-colors ${c.row} ${i === atividades.length - 1 ? 'border-b-0' : ''}`}>
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${c.badge}`}>
+                    <Activity size={13} className="text-purple-400" />
+                  </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold truncate">{p.nome_documento}</p>
-                    <p className={`text-xs truncate ${c.muted}`}>{(p.pendix_clientes as any)?.nome ?? '—'}</p>
+                    <p className="text-sm font-semibold truncate">{a.acao}</p>
+                    {a.descricao && <p className={`text-xs truncate ${c.muted}`}>{a.descricao}</p>}
                   </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    {p.data_limite && (
-                      <span className={`text-xs ${c.muted}`}>até {p.data_limite}</span>
-                    )}
-                    <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full border ${STATUS_COLOR[p.status]}`}>
-                      {STATUS_LABEL[p.status]}
-                    </span>
-                  </div>
+                  <span className={`text-[10px] shrink-0 ${c.muted}`}>{new Date(a.created_at).toLocaleDateString('pt-BR')}</span>
                 </div>
               ))}
             </div>
           )}
         </div>
 
-        {/* Clientes com mais pendências */}
+        {/* Próximas cobranças */}
         <div className={`rounded-2xl border ${c.card}`}>
           <div className={`flex items-center justify-between px-5 py-4 border-b ${isDark ? 'border-white/5' : 'border-gray-100'}`}>
             <div className="flex items-center gap-2">
-              <TrendingUp size={15} className="text-purple-400" />
-              <span className="text-sm font-bold">Clientes</span>
+              <CalendarClock size={15} className="text-purple-400" />
+              <span className="text-sm font-bold">Próximas Cobranças</span>
             </div>
-            <Link to="/pendix/app/clientes" className="text-xs text-purple-400 hover:text-purple-300 font-bold flex items-center gap-1">
-              Gerenciar <ArrowRight size={11} />
+            <Link to="/pendix/app/pendencias" className="text-xs text-purple-400 hover:text-purple-300 font-bold flex items-center gap-1">
+              Ver todas <ArrowRight size={11} />
             </Link>
           </div>
           {loading ? (
@@ -201,34 +283,26 @@ export default function PendixDashboard() {
                 <div key={i} className={`h-10 rounded-xl animate-pulse ${isDark ? 'bg-white/5' : 'bg-gray-100'}`} />
               ))}
             </div>
-          ) : clientes.length === 0 ? (
-            <div className={`p-8 text-center text-sm ${c.muted}`}>
-              Nenhum cliente cadastrado.
-              <Link to="/pendix/app/clientes" className="block mt-2 text-purple-400 font-bold text-xs">
-                Cadastrar agora →
-              </Link>
-            </div>
+          ) : proximasCobrancas.length === 0 ? (
+            <div className={`p-8 text-center text-sm ${c.muted}`}>Nenhuma cobrança agendada.</div>
           ) : (
             <div>
-              {clientes.slice(0, 8).map((cl, i) => {
-                const count = pendencias.filter(p => p.cliente_id === cl.id && p.status === 'pendente').length;
-                return (
-                  <div key={cl.id} className={`flex items-center gap-3 px-5 py-3 border-b transition-colors ${c.row} ${i === Math.min(clientes.length, 8) - 1 ? 'border-b-0' : ''}`}>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black ${isDark ? 'bg-purple-500/15 text-purple-400' : 'bg-purple-100 text-purple-700'}`}>
-                      {cl.nome.substring(0, 2).toUpperCase()}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold truncate">{cl.nome}</p>
-                      <p className={`text-[10px] ${c.muted}`}>{cl.regime?.replace('_', ' ') ?? '—'}</p>
-                    </div>
-                    {count > 0 && (
-                      <span className="text-[10px] font-black bg-yellow-500/15 text-yellow-400 border border-yellow-500/20 px-2 py-0.5 rounded-full">
-                        {count}
-                      </span>
-                    )}
+              {proximasCobrancas.map((p, i) => (
+                <Link
+                  key={p.id}
+                  to={`/pendix/app/pendencias/${p.id}`}
+                  className={`flex items-center gap-3 px-5 py-3 border-b transition-colors ${c.row} ${i === proximasCobrancas.length - 1 ? 'border-b-0' : ''}`}
+                >
+                  <Clock size={13} className={c.muted} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold truncate">{p.nome_documento}</p>
+                    <p className={`text-[10px] truncate ${c.muted}`}>{(p.pendix_clientes as any)?.nome ?? '—'}</p>
                   </div>
-                );
-              })}
+                  <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full border shrink-0 ${STATUS_COLOR[p.status]}`}>
+                    {p.data_limite}
+                  </span>
+                </Link>
+              ))}
             </div>
           )}
         </div>

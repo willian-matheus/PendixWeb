@@ -110,6 +110,15 @@ export default function PendixLogin() {
               </div>
             )}
 
+            <div className="flex justify-end -mt-1">
+              <Link
+                to="/pendix/esqueci-senha"
+                className="text-[11px] text-gray-500 hover:text-purple-400 transition-colors tracking-wide"
+              >
+                Esqueci minha senha
+              </Link>
+            </div>
+
             <button
               type="submit"
               disabled={loading}
@@ -124,17 +133,17 @@ export default function PendixLogin() {
           </form>
 
           <div className="mt-8 pt-6 border-t border-white/[0.06] text-center">
-            <Link
-              to="/pendix"
-              className="text-[11px] text-gray-700 hover:text-purple-400 transition-colors tracking-wider"
-            >
-              ← Voltar à página inicial
-            </Link>
+            <p className="text-xs text-gray-600">
+              Não tem uma conta?{' '}
+              <Link to="/pendix/registro" className="text-purple-400 hover:text-purple-300 font-bold transition-colors">
+                Criar conta
+              </Link>
+            </p>
           </div>
         </div>
 
         <p className="text-center mt-6 text-[10px] text-gray-800 tracking-wider uppercase">
-          Pendix © {new Date().getFullYear()} — Plataforma Flash
+          Pendix © {new Date().getFullYear()} — Todos os direitos reservados
         </p>
       </div>
     </div>

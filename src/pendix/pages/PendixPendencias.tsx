@@ -1,27 +1,48 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate, useSearchParams } from 'react-router';
 import {
-  Search, Filter, MessageCircle, CheckCircle2, XCircle,
-  Eye, Trash2, RefreshCw, Plus, X, Clock, Brain,
+  Search, MessageCircle, CheckCircle2, XCircle, Send, CheckCheck, AlertTriangle,
+  Eye, Edit2, Trash2, RefreshCw, Plus, X, Clock, Paperclip,
 } from 'lucide-react';
 import { useTheme } from '../../app/theme/ThemeProvider';
 import { toast } from 'sonner';
 import {
-  getPendixPendencias, updatePendixPendenciaStatus, deletePendixPendencia,
+  getPendixPendencias, updatePendixPendenciaStatus, updatePendixPendenciaCampos, deletePendixPendencia,
   getPendixClientes, postPendixPendencia, addPendixHistorico,
+  getPendenciaExtra, savePendenciaExtra,
   type PendixPendencia, type PendixPendenciaStatus, type PendixCliente,
+  type PendixPendenciaTipo, type PendixPrioridade, type PendixFrequenciaCobranca,
 } from '../services/pendix';
+import { getPendixEmpresas, getClienteEmpresaLinks, getClientesIdsDaEmpresa, type PendixEmpresa } from '../services/empresas';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '../../app/components/ui/alert-dialog';
 
 const STATUS_CONFIG: Record<PendixPendenciaStatus, { label: string; color: string; icon: React.ComponentType<any> }> = {
-  pendente:   { label: 'Pendente',   color: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/20',   icon: Clock },
-  recebido:   { label: 'Recebido',   color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20', icon: CheckCircle2 },
-  em_analise: { label: 'Em análise', color: 'bg-purple-500/15 text-purple-400 border-purple-500/20',   icon: Brain },
-  rejeitado:  { label: 'Rejeitado',  color: 'bg-red-500/15 text-red-400 border-red-500/20',             icon: XCircle },
-  cancelado:  { label: 'Cancelado',  color: 'bg-gray-500/15 text-gray-400 border-gray-500/20',          icon: X },
+  pendente:  { label: 'Pendente',   color: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/20',   icon: Clock },
+  enviada:   { label: 'Enviada',    color: 'bg-blue-500/15 text-blue-400 border-blue-500/20',          icon: Send },
+  recebida:  { label: 'Recebida',   color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20', icon: CheckCircle2 },
+  concluida: { label: 'Concluída',  color: 'bg-green-500/15 text-green-400 border-green-500/20',       icon: CheckCheck },
+  vencida:   { label: 'Vencida',    color: 'bg-red-500/15 text-red-400 border-red-500/20',              icon: AlertTriangle },
+  cancelada: { label: 'Cancelada',  color: 'bg-gray-500/15 text-gray-400 border-gray-500/20',           icon: XCircle },
 };
+
+const PRIORIDADE_OPTIONS: { value: PendixPrioridade; label: string; color: string }[] = [
+  { value: 'baixa',   label: 'Baixa',   color: 'bg-gray-500/15 text-gray-400 border-gray-500/20' },
+  { value: 'media',   label: 'Média',   color: 'bg-blue-500/15 text-blue-400 border-blue-500/20' },
+  { value: 'alta',    label: 'Alta',    color: 'bg-orange-500/15 text-orange-400 border-orange-500/20' },
+  { value: 'urgente', label: 'Urgente', color: 'bg-red-500/15 text-red-400 border-red-500/20' },
+];
+
+const FREQ_COBRANCA_OPTIONS: { value: PendixFrequenciaCobranca; label: string }[] = [
+  { value: 'unica', label: 'Uma vez' },
+  { value: 'diaria', label: 'Diária' },
+  { value: 'a_cada_2_dias', label: 'A cada 2 dias' },
+  { value: 'semanal', label: 'Semanal' },
+  { value: 'quinzenal', label: 'Quinzenal' },
+  { value: 'mensal', label: 'Mensal' },
+];
 
 function mesAtual() {
   const d = new Date();
@@ -38,27 +59,49 @@ function meses() {
   return result;
 }
 
+const EMPTY_FORM = {
+  tipo: 'cliente' as PendixPendenciaTipo,
+  clienteId: '',
+  empresaId: '',
+  escopoEmpresa: 'especifico' as 'especifico' | 'todos',
+  titulo: '',
+  descricao: '',
+  prioridade: 'media' as PendixPrioridade,
+  competencia: mesAtual(),
+  dataVencimento: '',
+  dataInicioCobranca: '',
+  frequenciaCobranca: 'unica' as PendixFrequenciaCobranca,
+  anexoNome: '',
+  observacaoInterna: '',
+};
+
 export default function PendixPendencias() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [pendencias, setPendencias] = useState<PendixPendencia[]>([]);
   const [clientes, setClientes] = useState<PendixCliente[]>([]);
+  const [empresas, setEmpresas] = useState<PendixEmpresa[]>([]);
+  const [links, setLinks] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(searchParams.get('busca') ?? '');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterCliente, setFilterCliente] = useState('');
+  const [filterEmpresa, setFilterEmpresa] = useState('');
+  const [filterPrioridade, setFilterPrioridade] = useState('');
   const [filterCompetencia, setFilterCompetencia] = useState(mesAtual());
+  const [filterData, setFilterData] = useState('');
 
-  const [detalhes, setDetalhes] = useState<PendixPendencia | null>(null);
-  const [obsText, setObsText] = useState('');
   const [atualizando, setAtualizando] = useState<string | null>(null);
   const [excluindo, setExcluindo] = useState<PendixPendencia | null>(null);
 
-  const [novaOpen, setNovaOpen] = useState(false);
-  const [novaForm, setNovaForm] = useState({ cliente_id: '', nome_documento: '', competencia: mesAtual(), data_limite: '' });
-  const [salvandoNova, setSalvandoNova] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editandoId, setEditandoId] = useState<string | null>(null);
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [salvando, setSalvando] = useState(false);
 
   const c = {
     page:   isDark ? 'text-gray-200'                    : 'text-gray-900',
@@ -74,7 +117,7 @@ export default function PendixPendencias() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [p, cl] = await Promise.all([
+      const [p, cl, emp] = await Promise.all([
         getPendixPendencias({
           clienteId: filterCliente || undefined,
           status: filterStatus || undefined,
@@ -82,9 +125,12 @@ export default function PendixPendencias() {
           search: search || undefined,
         }),
         clientes.length ? Promise.resolve(clientes) : getPendixClientes(),
+        empresas.length ? Promise.resolve(empresas) : getPendixEmpresas(),
       ]);
       setPendencias(p);
       if (!clientes.length) setClientes(cl);
+      if (!empresas.length) setEmpresas(emp);
+      setLinks(getClienteEmpresaLinks());
     } catch {
       toast.error('Erro ao carregar pendências');
     } finally {
@@ -94,20 +140,29 @@ export default function PendixPendencias() {
 
   useEffect(() => { load(); }, [load]);
 
-  async function changeStatus(p: PendixPendencia, status: PendixPendenciaStatus, obs?: string) {
+  const visiveis = pendencias.filter(p => {
+    const extra = getPendenciaExtra(p.id);
+    if (filterPrioridade && extra.prioridade !== filterPrioridade) return false;
+    if (filterData && p.data_limite !== filterData) return false;
+    if (filterEmpresa) {
+      const empresaDaPendencia = extra.empresa_id ?? links[p.cliente_id];
+      if (empresaDaPendencia !== filterEmpresa) return false;
+    }
+    return true;
+  });
+
+  async function changeStatus(p: PendixPendencia, status: PendixPendenciaStatus) {
     setAtualizando(p.id);
     try {
-      const updated = await updatePendixPendenciaStatus(p.id, status, obs);
+      const updated = await updatePendixPendenciaStatus(p.id, status);
       setPendencias(prev => prev.map(x => x.id === p.id ? { ...x, ...updated } : x));
       await addPendixHistorico({
         escritorio_id: p.escritorio_id,
         pendencia_id: p.id,
         cliente_id: p.cliente_id,
         acao: `Status alterado para ${STATUS_CONFIG[status].label}`,
-        descricao: obs,
       });
       toast.success(`Status: ${STATUS_CONFIG[status].label}`);
-      if (detalhes?.id === p.id) setDetalhes({ ...detalhes, status, observacoes: obs ?? detalhes.observacoes });
     } catch { toast.error('Erro ao atualizar status'); }
     finally { setAtualizando(null); }
   }
@@ -122,29 +177,6 @@ export default function PendixPendencias() {
     finally { setExcluindo(null); }
   }
 
-  async function handleSalvarNova() {
-    if (!novaForm.cliente_id || !novaForm.nome_documento) {
-      toast.error('Cliente e nome do documento são obrigatórios');
-      return;
-    }
-    setSalvandoNova(true);
-    try {
-      const nova = await postPendixPendencia({
-        escritorio_id: '',
-        ...novaForm,
-        status: 'pendente',
-      });
-      setPendencias(prev => [nova, ...prev]);
-      toast.success('Pendência criada');
-      setNovaOpen(false);
-      setNovaForm({ cliente_id: '', nome_documento: '', competencia: mesAtual(), data_limite: '' });
-    } catch (e: any) {
-      toast.error(e?.message || 'Erro ao criar pendência');
-    } finally {
-      setSalvandoNova(false);
-    }
-  }
-
   function cobrarWhatsApp(p: PendixPendencia) {
     const tel = (p.pendix_clientes as any)?.telefone;
     if (!tel) { toast.error('Cliente sem número de WhatsApp cadastrado'); return; }
@@ -153,6 +185,7 @@ export default function PendixPendencias() {
       `Olá, identificamos que ainda não recebemos "${p.nome_documento}" referente à competência ${p.competencia}. Por favor, envie o documento para prosseguirmos.`
     );
     window.open(`https://wa.me/${num}?text=${msg}`, '_blank');
+    if (p.status === 'pendente') changeStatus(p, 'enviada');
     addPendixHistorico({
       escritorio_id: p.escritorio_id, pendencia_id: p.id, cliente_id: p.cliente_id,
       acao: 'Cobrança enviada via WhatsApp',
@@ -160,17 +193,111 @@ export default function PendixPendencias() {
     });
   }
 
+  function openNovaModal() {
+    setEditandoId(null);
+    setForm(EMPTY_FORM);
+    setModalOpen(true);
+  }
+
+  function openEditarModal(p: PendixPendencia) {
+    const extra = getPendenciaExtra(p.id);
+    setEditandoId(p.id);
+    setForm({
+      tipo: extra.tipo ?? 'cliente',
+      clienteId: p.cliente_id,
+      empresaId: extra.empresa_id ?? '',
+      escopoEmpresa: 'especifico',
+      titulo: p.nome_documento,
+      descricao: extra.descricao ?? '',
+      prioridade: extra.prioridade ?? 'media',
+      competencia: p.competencia,
+      dataVencimento: p.data_limite ?? '',
+      dataInicioCobranca: extra.data_inicio_cobranca ?? '',
+      frequenciaCobranca: extra.frequencia_cobranca ?? 'unica',
+      anexoNome: extra.anexo_nome ?? '',
+      observacaoInterna: p.observacoes ?? '',
+    });
+    setModalOpen(true);
+  }
+
+  const clientesDaEmpresaSelecionada = form.empresaId
+    ? clientes.filter(cl => links[cl.id] === form.empresaId)
+    : [];
+
+  async function handleSalvar() {
+    if (!form.titulo.trim()) { toast.error('Título da pendência é obrigatório'); return; }
+    if (form.tipo === 'cliente' && !form.clienteId) { toast.error('Selecione um cliente'); return; }
+    if (form.tipo === 'empresa' && !form.empresaId) { toast.error('Selecione uma empresa'); return; }
+    if (form.tipo === 'empresa' && form.escopoEmpresa === 'especifico' && !form.clienteId) { toast.error('Selecione o cliente da empresa'); return; }
+
+    setSalvando(true);
+    try {
+      const extra = {
+        tipo: form.tipo,
+        empresa_id: form.tipo === 'empresa' ? form.empresaId : undefined,
+        descricao: form.descricao || undefined,
+        prioridade: form.prioridade,
+        data_inicio_cobranca: form.dataInicioCobranca || undefined,
+        frequencia_cobranca: form.frequenciaCobranca,
+        anexo_nome: form.anexoNome || undefined,
+      };
+
+      if (editandoId) {
+        const updated = await updatePendixPendenciaCampos(editandoId, {
+          nome_documento: form.titulo,
+          competencia: form.competencia,
+          data_limite: form.dataVencimento || undefined,
+          observacoes: form.observacaoInterna || undefined,
+        });
+        savePendenciaExtra(editandoId, extra);
+        setPendencias(prev => prev.map(p => p.id === editandoId ? updated : p));
+        toast.success('Pendência atualizada');
+      } else if (form.tipo === 'empresa' && form.escopoEmpresa === 'todos') {
+        const idsClientes = getClientesIdsDaEmpresa(form.empresaId).filter(id => clientes.some(cl => cl.id === id));
+        if (!idsClientes.length) { toast.error('Nenhum cliente vinculado a essa empresa'); setSalvando(false); return; }
+        const criadas: PendixPendencia[] = [];
+        for (const clienteId of idsClientes) {
+          const nova = await postPendixPendencia({
+            escritorio_id: '', cliente_id: clienteId, nome_documento: form.titulo,
+            competencia: form.competencia, status: 'pendente',
+            data_limite: form.dataVencimento || undefined, observacoes: form.observacaoInterna || undefined,
+          } as any);
+          savePendenciaExtra(nova.id, extra);
+          criadas.push(nova);
+        }
+        setPendencias(prev => [...criadas, ...prev]);
+        toast.success(`${criadas.length} pendências criadas para os clientes da empresa`);
+      } else {
+        const clienteId = form.tipo === 'empresa' ? form.clienteId : form.clienteId;
+        const nova = await postPendixPendencia({
+          escritorio_id: '', cliente_id: clienteId, nome_documento: form.titulo,
+          competencia: form.competencia, status: 'pendente',
+          data_limite: form.dataVencimento || undefined, observacoes: form.observacaoInterna || undefined,
+        } as any);
+        savePendenciaExtra(nova.id, extra);
+        setPendencias(prev => [nova, ...prev]);
+        toast.success('Pendência criada');
+      }
+      setModalOpen(false);
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao salvar pendência');
+    } finally {
+      setSalvando(false);
+    }
+  }
+
   const counts = {
     pendente: pendencias.filter(p => p.status === 'pendente').length,
-    recebido: pendencias.filter(p => p.status === 'recebido').length,
-    em_analise: pendencias.filter(p => p.status === 'em_analise').length,
-    rejeitado: pendencias.filter(p => p.status === 'rejeitado').length,
+    enviada: pendencias.filter(p => p.status === 'enviada').length,
+    recebida: pendencias.filter(p => p.status === 'recebida').length,
+    concluida: pendencias.filter(p => p.status === 'concluida').length,
+    vencida: pendencias.filter(p => p.status === 'vencida').length,
   };
 
   return (
     <div className={c.page}>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
         <div>
           <span className="text-xs font-bold uppercase tracking-widest text-purple-400">Pendix</span>
           <h1 className="text-2xl font-black tracking-tight mt-1">Central de Pendências</h1>
@@ -180,7 +307,7 @@ export default function PendixPendencias() {
             <RefreshCw size={14} className={loading ? 'animate-spin text-purple-400' : c.muted} />
           </button>
           <button
-            onClick={() => setNovaOpen(true)}
+            onClick={openNovaModal}
             className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition-colors"
           >
             <Plus size={14} /> Nova Pendência
@@ -206,12 +333,12 @@ export default function PendixPendencias() {
       </div>
 
       {/* Filtros */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-        <div className="relative">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-5">
+        <div className="relative xl:col-span-1">
           <Search size={13} className={`absolute left-3 top-1/2 -translate-y-1/2 ${c.muted}`} />
           <input
             value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Buscar documento ou cliente..."
+            placeholder="Buscar..."
             className={`w-full rounded-xl border pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.input}`}
           />
         </div>
@@ -223,19 +350,30 @@ export default function PendixPendencias() {
           {clientes.map(cl => <option key={cl.id} value={cl.id}>{cl.nome}</option>)}
         </select>
         <select
+          value={filterEmpresa} onChange={e => setFilterEmpresa(e.target.value)}
+          className={`rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.select}`}
+        >
+          <option value="">Todas as empresas</option>
+          {empresas.map(em => <option key={em.id} value={em.id}>{em.nome}</option>)}
+        </select>
+        <select
+          value={filterPrioridade} onChange={e => setFilterPrioridade(e.target.value)}
+          className={`rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.select}`}
+        >
+          <option value="">Toda prioridade</option>
+          {PRIORIDADE_OPTIONS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+        </select>
+        <select
           value={filterCompetencia} onChange={e => setFilterCompetencia(e.target.value)}
           className={`rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.select}`}
         >
           <option value="">Todas as competências</option>
           {meses().map(m => <option key={m} value={m}>{m}</option>)}
         </select>
-        <select
-          value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-          className={`rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.select}`}
-        >
-          <option value="">Todos os status</option>
-          {Object.entries(STATUS_CONFIG).map(([v, { label }]) => <option key={v} value={v}>{label}</option>)}
-        </select>
+        <input
+          type="date" value={filterData} onChange={e => setFilterData(e.target.value)}
+          className={`rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.input}`}
+        />
       </div>
 
       {/* Lista */}
@@ -246,22 +384,27 @@ export default function PendixPendencias() {
               <div key={i} className={`h-14 rounded-xl animate-pulse ${isDark ? 'bg-white/5' : 'bg-gray-100'}`} />
             ))}
           </div>
-        ) : pendencias.length === 0 ? (
+        ) : visiveis.length === 0 ? (
           <div className={`p-14 text-center text-sm ${c.muted}`}>Nenhuma pendência encontrada com os filtros selecionados.</div>
         ) : (
-          pendencias.map((p, i) => {
+          visiveis.map((p, i) => {
             const cfg = STATUS_CONFIG[p.status];
             const Icon = cfg.icon;
-            const isVencida = p.data_limite && p.status === 'pendente' && new Date(p.data_limite) < new Date();
+            const extra = getPendenciaExtra(p.id);
+            const prio = extra.prioridade ? PRIORIDADE_OPTIONS.find(x => x.value === extra.prioridade) : null;
             return (
-              <div key={p.id} className={`flex items-center gap-4 px-5 py-3.5 border-b transition-colors ${c.row} ${i === pendencias.length - 1 ? 'border-b-0' : ''}`}>
+              <div
+                key={p.id}
+                onClick={() => navigate(`/pendix/app/pendencias/${p.id}`)}
+                className={`flex items-center gap-4 px-5 py-3.5 border-b transition-colors cursor-pointer ${c.row} ${i === visiveis.length - 1 ? 'border-b-0' : ''}`}
+              >
                 <Icon size={15} className={cfg.color.split(' ')[1]} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-semibold truncate">{p.nome_documento}</p>
-                    {isVencida && (
-                      <span className="text-[9px] font-black bg-red-500/15 text-red-400 border border-red-500/20 px-1.5 py-0.5 rounded-full uppercase tracking-widest shrink-0">
-                        Vencida
+                    {prio && (
+                      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full border uppercase tracking-widest shrink-0 ${prio.color}`}>
+                        {prio.label}
                       </span>
                     )}
                   </div>
@@ -270,51 +413,37 @@ export default function PendixPendencias() {
                     {p.data_limite && ` · até ${p.data_limite}`}
                   </p>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className={`text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full border ${cfg.color}`}>
+                <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
+                  <span className={`text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full border mr-1 ${cfg.color}`}>
                     {cfg.label}
                   </span>
-                  {/* Ações rápidas de status */}
                   {p.status === 'pendente' && (
-                    <button
-                      onClick={() => changeStatus(p, 'recebido')}
-                      disabled={atualizando === p.id}
-                      title="Marcar como recebido"
-                      className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-gray-500 hover:text-emerald-400 hover:bg-emerald-500/10' : 'text-gray-400 hover:text-emerald-600 hover:bg-emerald-50'}`}
-                    >
-                      <CheckCircle2 size={14} />
+                    <button onClick={() => changeStatus(p, 'enviada')} disabled={atualizando === p.id} title="Marcar como enviada"
+                      className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-gray-500 hover:text-blue-400 hover:bg-blue-500/10' : 'text-gray-400 hover:text-blue-600 hover:bg-blue-50'}`}>
+                      <Send size={13} />
                     </button>
                   )}
-                  {p.status === 'recebido' && (
-                    <button
-                      onClick={() => changeStatus(p, 'em_analise')}
-                      disabled={atualizando === p.id}
-                      title="Marcar como em análise"
-                      className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-gray-500 hover:text-purple-400 hover:bg-purple-500/10' : 'text-gray-400 hover:text-purple-600 hover:bg-purple-50'}`}
-                    >
-                      <Brain size={14} />
+                  {(p.status === 'pendente' || p.status === 'enviada') && (
+                    <button onClick={() => changeStatus(p, 'recebida')} disabled={atualizando === p.id} title="Marcar como recebida"
+                      className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-gray-500 hover:text-emerald-400 hover:bg-emerald-500/10' : 'text-gray-400 hover:text-emerald-600 hover:bg-emerald-50'}`}>
+                      <CheckCircle2 size={13} />
                     </button>
                   )}
-                  <button
-                    onClick={() => cobrarWhatsApp(p)}
-                    title="Cobrar via WhatsApp"
-                    className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-gray-500 hover:text-emerald-400 hover:bg-emerald-500/10' : 'text-gray-400 hover:text-emerald-600 hover:bg-emerald-50'}`}
-                  >
-                    <MessageCircle size={14} />
+                  <button onClick={() => cobrarWhatsApp(p)} title="Cobrar via WhatsApp"
+                    className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-gray-500 hover:text-emerald-400 hover:bg-emerald-500/10' : 'text-gray-400 hover:text-emerald-600 hover:bg-emerald-50'}`}>
+                    <MessageCircle size={13} />
                   </button>
-                  <button
-                    onClick={() => { setDetalhes(p); setObsText(p.observacoes ?? ''); }}
-                    title="Ver detalhes"
-                    className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-gray-500 hover:text-blue-400 hover:bg-blue-500/10' : 'text-gray-400 hover:text-blue-600 hover:bg-blue-50'}`}
-                  >
-                    <Eye size={14} />
+                  <button onClick={() => navigate(`/pendix/app/pendencias/${p.id}`)} title="Visualizar"
+                    className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-gray-500 hover:text-blue-400 hover:bg-blue-500/10' : 'text-gray-400 hover:text-blue-600 hover:bg-blue-50'}`}>
+                    <Eye size={13} />
                   </button>
-                  <button
-                    onClick={() => setExcluindo(p)}
-                    title="Remover"
-                    className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-gray-500 hover:text-red-400 hover:bg-red-500/10' : 'text-gray-400 hover:text-red-600 hover:bg-red-50'}`}
-                  >
-                    <Trash2 size={14} />
+                  <button onClick={() => openEditarModal(p)} title="Editar"
+                    className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-gray-500 hover:text-purple-400 hover:bg-purple-500/10' : 'text-gray-400 hover:text-purple-600 hover:bg-purple-50'}`}>
+                    <Edit2 size={13} />
+                  </button>
+                  <button onClick={() => setExcluindo(p)} title="Remover"
+                    className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-gray-500 hover:text-red-400 hover:bg-red-500/10' : 'text-gray-400 hover:text-red-600 hover:bg-red-50'}`}>
+                    <Trash2 size={13} />
                   </button>
                 </div>
               </div>
@@ -323,146 +452,181 @@ export default function PendixPendencias() {
         )}
       </div>
 
-      {/* Modal Detalhes */}
-      {detalhes && (
+      {/* Modal Nova / Editar Pendência */}
+      {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className={`w-full max-w-md rounded-2xl border shadow-2xl ${c.modal}`}>
+          <div className={`w-full max-w-xl rounded-2xl border shadow-2xl ${c.modal}`}>
             <div className={`flex items-center justify-between px-6 py-4 border-b ${isDark ? 'border-white/8' : 'border-gray-100'}`}>
-              <h2 className="text-base font-black">Detalhes da Pendência</h2>
-              <button onClick={() => setDetalhes(null)} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-white/8' : 'hover:bg-gray-100'}`}>
+              <h2 className="text-base font-black">{editandoId ? 'Editar Pendência' : 'Nova Pendência'}</h2>
+              <button onClick={() => setModalOpen(false)} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-white/8' : 'hover:bg-gray-100'}`}>
                 <X size={16} />
               </button>
             </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <p className={`text-xs font-bold uppercase tracking-widest mb-1 ${c.label}`}>Documento</p>
-                <p className="text-sm font-semibold">{detalhes.nome_documento}</p>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
+            <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+              {!editandoId && (
                 <div>
-                  <p className={`text-xs font-bold uppercase tracking-widest mb-1 ${c.label}`}>Cliente</p>
-                  <p className="text-sm">{(detalhes.pendix_clientes as any)?.nome ?? '—'}</p>
+                  <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Tipo</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(['cliente', 'empresa'] as PendixPendenciaTipo[]).map(t => (
+                      <button
+                        key={t} type="button"
+                        onClick={() => setForm(p => ({ ...p, tipo: t, clienteId: '', empresaId: '' }))}
+                        className={`px-4 py-2.5 rounded-xl border text-sm font-bold capitalize transition-colors ${form.tipo === t ? 'bg-purple-600 border-purple-600 text-white' : `${c.select} ${isDark ? 'hover:border-white/20' : 'hover:border-gray-300'}`}`}
+                      >
+                        {t === 'cliente' ? 'Cliente' : 'Empresa'}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div>
-                  <p className={`text-xs font-bold uppercase tracking-widest mb-1 ${c.label}`}>Competência</p>
-                  <p className="text-sm">{detalhes.competencia}</p>
-                </div>
-                <div>
-                  <p className={`text-xs font-bold uppercase tracking-widest mb-1 ${c.label}`}>Data Limite</p>
-                  <p className="text-sm">{detalhes.data_limite ?? '—'}</p>
-                </div>
-                <div>
-                  <p className={`text-xs font-bold uppercase tracking-widest mb-1 ${c.label}`}>Status</p>
-                  <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full border ${STATUS_CONFIG[detalhes.status].color}`}>
-                    {STATUS_CONFIG[detalhes.status].label}
-                  </span>
-                </div>
-              </div>
-              <div>
-                <p className={`text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Observações</p>
-                <textarea
-                  value={obsText}
-                  onChange={e => setObsText(e.target.value)}
-                  rows={3}
-                  placeholder="Adicionar observação..."
-                  className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 resize-none transition ${c.input}`}
-                />
-              </div>
-              <div>
-                <p className={`text-xs font-bold uppercase tracking-widest mb-2 ${c.label}`}>Alterar Status</p>
-                <div className="flex flex-wrap gap-2">
-                  {(Object.entries(STATUS_CONFIG) as [PendixPendenciaStatus, typeof STATUS_CONFIG[PendixPendenciaStatus]][]).map(([s, cfg]) => (
-                    <button
-                      key={s}
-                      disabled={detalhes.status === s || atualizando === detalhes.id}
-                      onClick={() => changeStatus(detalhes, s, obsText)}
-                      className={`text-[11px] font-bold px-3 py-1.5 rounded-full border transition-all disabled:opacity-40 ${detalhes.status === s ? cfg.color : (isDark ? 'border-white/10 text-gray-400 hover:border-white/20' : 'border-gray-200 text-gray-500 hover:border-gray-300')}`}
-                    >
-                      {cfg.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div className={`flex justify-between gap-3 px-6 py-4 border-t ${isDark ? 'border-white/8' : 'border-gray-100'}`}>
-              <button
-                onClick={() => cobrarWhatsApp(detalhes)}
-                className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold rounded-xl bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 border border-emerald-500/20 transition-colors"
-              >
-                <MessageCircle size={14} /> Cobrar no WhatsApp
-              </button>
-              <button
-                onClick={() => changeStatus(detalhes, detalhes.status, obsText)}
-                disabled={atualizando === detalhes.id}
-                className="px-5 py-2.5 text-sm font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition-colors disabled:opacity-50"
-              >
-                Salvar Observação
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+              )}
 
-      {/* Modal Nova Pendência */}
-      {novaOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className={`w-full max-w-md rounded-2xl border shadow-2xl ${c.modal}`}>
-            <div className={`flex items-center justify-between px-6 py-4 border-b ${isDark ? 'border-white/8' : 'border-gray-100'}`}>
-              <h2 className="text-base font-black">Nova Pendência</h2>
-              <button onClick={() => setNovaOpen(false)} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-white/8' : 'hover:bg-gray-100'}`}>
-                <X size={16} />
-              </button>
-            </div>
-            <div className="p-6 space-y-4">
+              {form.tipo === 'cliente' && (
+                <div>
+                  <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Cliente *</label>
+                  <select
+                    value={form.clienteId} onChange={e => setForm(p => ({ ...p, clienteId: e.target.value }))}
+                    className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.select}`}
+                  >
+                    <option value="">Selecionar cliente</option>
+                    {clientes.map(cl => <option key={cl.id} value={cl.id}>{cl.nome}</option>)}
+                  </select>
+                </div>
+              )}
+
+              {form.tipo === 'empresa' && (
+                <>
+                  <div>
+                    <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Empresa *</label>
+                    <select
+                      value={form.empresaId} onChange={e => setForm(p => ({ ...p, empresaId: e.target.value, clienteId: '' }))}
+                      className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.select}`}
+                    >
+                      <option value="">Selecionar empresa</option>
+                      {empresas.map(em => <option key={em.id} value={em.id}>{em.nome}</option>)}
+                    </select>
+                  </div>
+                  {form.empresaId && (
+                    <div>
+                      <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Abrangência</label>
+                      <div className="grid grid-cols-2 gap-2 mb-2">
+                        <button type="button" onClick={() => setForm(p => ({ ...p, escopoEmpresa: 'especifico' }))}
+                          className={`px-4 py-2 rounded-xl border text-xs font-bold transition-colors ${form.escopoEmpresa === 'especifico' ? 'bg-purple-600 border-purple-600 text-white' : c.select}`}>
+                          Cliente específico
+                        </button>
+                        <button type="button" onClick={() => setForm(p => ({ ...p, escopoEmpresa: 'todos' }))}
+                          className={`px-4 py-2 rounded-xl border text-xs font-bold transition-colors ${form.escopoEmpresa === 'todos' ? 'bg-purple-600 border-purple-600 text-white' : c.select}`}>
+                          Todos os clientes da empresa
+                        </button>
+                      </div>
+                      {form.escopoEmpresa === 'especifico' && (
+                        <select
+                          value={form.clienteId} onChange={e => setForm(p => ({ ...p, clienteId: e.target.value }))}
+                          className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.select}`}
+                        >
+                          <option value="">Selecionar cliente da empresa</option>
+                          {clientesDaEmpresaSelecionada.map(cl => <option key={cl.id} value={cl.id}>{cl.nome}</option>)}
+                        </select>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+
               <div>
-                <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Cliente *</label>
-                <select
-                  value={novaForm.cliente_id}
-                  onChange={e => setNovaForm(p => ({ ...p, cliente_id: e.target.value }))}
-                  className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.select}`}
-                >
-                  <option value="">Selecionar cliente</option>
-                  {clientes.map(cl => <option key={cl.id} value={cl.id}>{cl.nome}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Documento *</label>
+                <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Título da pendência *</label>
                 <input
-                  value={novaForm.nome_documento}
-                  onChange={e => setNovaForm(p => ({ ...p, nome_documento: e.target.value }))}
+                  value={form.titulo} onChange={e => setForm(p => ({ ...p, titulo: e.target.value }))}
                   placeholder="Ex: Extrato Bancário"
                   className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.input}`}
                 />
               </div>
+
+              <div>
+                <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Descrição</label>
+                <textarea
+                  value={form.descricao} onChange={e => setForm(p => ({ ...p, descricao: e.target.value }))}
+                  rows={2} placeholder="Detalhes sobre o que deve ser enviado..."
+                  className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 resize-none transition ${c.input}`}
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Prioridade</label>
+                  <select
+                    value={form.prioridade} onChange={e => setForm(p => ({ ...p, prioridade: e.target.value as PendixPrioridade }))}
+                    className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.select}`}
+                  >
+                    {PRIORIDADE_OPTIONS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                  </select>
+                </div>
                 <div>
                   <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Competência</label>
                   <input
-                    type="month" value={novaForm.competencia}
-                    onChange={e => setNovaForm(p => ({ ...p, competencia: e.target.value }))}
-                    className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.input}`}
-                  />
-                </div>
-                <div>
-                  <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Data Limite</label>
-                  <input
-                    type="date" value={novaForm.data_limite}
-                    onChange={e => setNovaForm(p => ({ ...p, data_limite: e.target.value }))}
+                    type="month" value={form.competencia} onChange={e => setForm(p => ({ ...p, competencia: e.target.value }))}
                     className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.input}`}
                   />
                 </div>
               </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Data de vencimento</label>
+                  <input
+                    type="date" value={form.dataVencimento} onChange={e => setForm(p => ({ ...p, dataVencimento: e.target.value }))}
+                    className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.input}`}
+                  />
+                </div>
+                <div>
+                  <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Data inicial da cobrança</label>
+                  <input
+                    type="date" value={form.dataInicioCobranca} onChange={e => setForm(p => ({ ...p, dataInicioCobranca: e.target.value }))}
+                    className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.input}`}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Frequência de cobrança</label>
+                <select
+                  value={form.frequenciaCobranca} onChange={e => setForm(p => ({ ...p, frequenciaCobranca: e.target.value as PendixFrequenciaCobranca }))}
+                  className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.select}`}
+                >
+                  {FREQ_COBRANCA_OPTIONS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Anexo de exemplo</label>
+                <label className={`flex items-center gap-2 w-full rounded-xl border px-4 py-2.5 text-sm cursor-pointer transition ${c.input}`}>
+                  <Paperclip size={14} className={c.muted} />
+                  <span className={form.anexoNome ? '' : c.muted}>{form.anexoNome || 'Selecionar arquivo de exemplo...'}</span>
+                  <input
+                    type="file" className="hidden"
+                    onChange={e => setForm(p => ({ ...p, anexoNome: e.target.files?.[0]?.name ?? '' }))}
+                  />
+                </label>
+              </div>
+
+              <div>
+                <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Observação interna</label>
+                <textarea
+                  value={form.observacaoInterna} onChange={e => setForm(p => ({ ...p, observacaoInterna: e.target.value }))}
+                  rows={2} placeholder="Visível apenas para a equipe..."
+                  className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 resize-none transition ${c.input}`}
+                />
+              </div>
             </div>
             <div className={`flex justify-end gap-3 px-6 py-4 border-t ${isDark ? 'border-white/8' : 'border-gray-100'}`}>
-              <button onClick={() => setNovaOpen(false)} className={`px-5 py-2.5 text-sm font-bold rounded-xl border transition-colors ${isDark ? 'border-white/10 hover:bg-white/5' : 'border-gray-200 hover:bg-gray-50'}`}>
+              <button onClick={() => setModalOpen(false)} className={`px-5 py-2.5 text-sm font-bold rounded-xl border transition-colors ${isDark ? 'border-white/10 hover:bg-white/5' : 'border-gray-200 hover:bg-gray-50'}`}>
                 Cancelar
               </button>
               <button
-                onClick={handleSalvarNova}
-                disabled={salvandoNova}
+                onClick={handleSalvar}
+                disabled={salvando}
                 className="px-5 py-2.5 text-sm font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition-colors disabled:opacity-50"
               >
-                {salvandoNova ? 'Criando...' : 'Criar'}
+                {salvando ? 'Salvando...' : editandoId ? 'Salvar alterações' : 'Criar'}
               </button>
             </div>
           </div>

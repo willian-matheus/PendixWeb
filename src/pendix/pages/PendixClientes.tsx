@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Edit2, Trash2, ChevronDown, ChevronUp, FileText, X } from 'lucide-react';
+import { Plus, Search, Edit2, Eye, Trash2, ChevronDown, ChevronUp, FileText, X, Building2, Mail, Phone } from 'lucide-react';
 import { useTheme } from '../../app/theme/ThemeProvider';
 import { useAuth } from '../../app/auth/AuthProvider';
 import { toast } from 'sonner';
@@ -8,6 +8,9 @@ import {
   getPendixDocConfigs, postPendixDocConfig, deletePendixDocConfig,
   type PendixCliente, type PendixDocConfig, type PendixRegime, type PendixClienteStatus, type PendixPrioridade, type PendixFrequencia,
 } from '../services/pendix';
+import {
+  getPendixEmpresas, getEmpresaIdDoCliente, setEmpresaDoCliente, getClienteEmpresaLinks, type PendixEmpresa,
+} from '../services/empresas';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -57,15 +60,21 @@ export default function PendixClientes() {
   const isDark = theme === 'dark';
 
   const [clientes, setClientes] = useState<PendixCliente[]>([]);
+  const [empresas, setEmpresas] = useState<PendixEmpresa[]>([]);
+  const [links, setLinks] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [docs, setDocs] = useState<Record<string, PendixDocConfig[]>>({});
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editando, setEditando] = useState<PendixCliente | null>(null);
   const [form, setForm] = useState(EMPTY_CLIENTE);
+  const [formEmpresaId, setFormEmpresaId] = useState('');
   const [saving, setSaving] = useState(false);
+
+  const [visualizando, setVisualizando] = useState<PendixCliente | null>(null);
 
   const [docModalOpen, setDocModalOpen] = useState(false);
   const [docClienteId, setDocClienteId] = useState<string | null>(null);
@@ -88,7 +97,12 @@ export default function PendixClientes() {
 
   async function load() {
     setLoading(true);
-    try { setClientes(await getPendixClientes()); }
+    try {
+      const [cl, emp] = await Promise.all([getPendixClientes(), getPendixEmpresas()]);
+      setClientes(cl);
+      setEmpresas(emp);
+      setLinks(getClienteEmpresaLinks());
+    }
     catch { toast.error('Erro ao carregar clientes'); }
     finally { setLoading(false); }
   }
@@ -107,8 +121,8 @@ export default function PendixClientes() {
   }
 
   function openModal(cliente?: PendixCliente) {
-    if (cliente) { setEditando(cliente); setForm({ ...cliente }); }
-    else { setEditando(null); setForm({ ...EMPTY_CLIENTE, escritorio_id: (user as any)?.officeId || '' }); }
+    if (cliente) { setEditando(cliente); setForm({ ...cliente }); setFormEmpresaId(getEmpresaIdDoCliente(cliente.id) || ''); }
+    else { setEditando(null); setForm({ ...EMPTY_CLIENTE, escritorio_id: (user as any)?.officeId || '' }); setFormEmpresaId(''); }
     setModalOpen(true);
   }
 
@@ -116,15 +130,20 @@ export default function PendixClientes() {
     if (!form.nome.trim()) { toast.error('Nome é obrigatório'); return; }
     setSaving(true);
     try {
+      let clienteId: string;
       if (editando) {
         const updated = await updatePendixCliente(editando.id, form);
         setClientes(prev => prev.map(c => c.id === editando.id ? updated : c));
+        clienteId = editando.id;
         toast.success('Cliente atualizado');
       } else {
         const novo = await postPendixCliente(form);
         setClientes(prev => [...prev, novo]);
+        clienteId = novo.id;
         toast.success('Cliente cadastrado');
       }
+      setEmpresaDoCliente(clienteId, formEmpresaId || null);
+      setLinks(getClienteEmpresaLinks());
       setModalOpen(false);
     } catch (e: any) {
       toast.error(e?.message || 'Erro ao salvar');
@@ -137,6 +156,7 @@ export default function PendixClientes() {
     if (!excluindo) return;
     try {
       await deletePendixCliente(excluindo.id);
+      setEmpresaDoCliente(excluindo.id, null);
       setClientes(prev => prev.filter(c => c.id !== excluindo.id));
       toast.success('Cliente removido');
     } catch { toast.error('Erro ao remover cliente'); }
@@ -173,9 +193,12 @@ export default function PendixClientes() {
   }
 
   const filtered = clientes.filter(c =>
-    c.nome.toLowerCase().includes(search.toLowerCase()) ||
-    c.responsavel?.toLowerCase().includes(search.toLowerCase()) ||
-    c.email?.toLowerCase().includes(search.toLowerCase())
+    (!filterStatus || c.status === filterStatus) &&
+    (
+      c.nome.toLowerCase().includes(search.toLowerCase()) ||
+      c.responsavel?.toLowerCase().includes(search.toLowerCase()) ||
+      c.email?.toLowerCase().includes(search.toLowerCase())
+    )
   );
 
   return (
@@ -195,15 +218,24 @@ export default function PendixClientes() {
         </button>
       </div>
 
-      {/* Search */}
-      <div className="relative mb-5">
-        <Search size={15} className={`absolute left-3.5 top-1/2 -translate-y-1/2 ${c.muted}`} />
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Buscar por nome, responsável ou e-mail..."
-          className={`w-full rounded-xl border pl-10 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.input}`}
-        />
+      {/* Search + filtro de status */}
+      <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3 mb-5">
+        <div className="relative">
+          <Search size={15} className={`absolute left-3.5 top-1/2 -translate-y-1/2 ${c.muted}`} />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar por nome, responsável ou e-mail..."
+            className={`w-full rounded-xl border pl-10 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.input}`}
+          />
+        </div>
+        <select
+          value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+          className={`rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.select}`}
+        >
+          <option value="">Todos os status</option>
+          {STATUS_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+        </select>
       </div>
 
       {/* Lista */}
@@ -238,6 +270,12 @@ export default function PendixClientes() {
                   <span className={`text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full border ${STATUS_BADGE[cl.status]}`}>
                     {cl.status}
                   </span>
+                  <button
+                    onClick={e => { e.stopPropagation(); setVisualizando(cl); }}
+                    className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-gray-500 hover:text-purple-400 hover:bg-purple-500/10' : 'text-gray-400 hover:text-purple-600 hover:bg-purple-50'}`}
+                  >
+                    <Eye size={13} />
+                  </button>
                   <button
                     onClick={e => { e.stopPropagation(); openModal(cl); }}
                     className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-gray-500 hover:text-blue-400 hover:bg-blue-500/10' : 'text-gray-400 hover:text-blue-600 hover:bg-blue-50'}`}
@@ -332,6 +370,17 @@ export default function PendixClientes() {
                   />
                 </div>
               ))}
+              <div>
+                <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Empresa vinculada (opcional)</label>
+                <select
+                  value={formEmpresaId}
+                  onChange={e => setFormEmpresaId(e.target.value)}
+                  className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.select}`}
+                >
+                  <option value="">Nenhuma</option>
+                  {empresas.map(em => <option key={em.id} value={em.id}>{em.nome}</option>)}
+                </select>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Regime</label>
@@ -443,6 +492,59 @@ export default function PendixClientes() {
                 className="px-5 py-2.5 text-sm font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition-colors disabled:opacity-50"
               >
                 {savingDoc ? 'Salvando...' : 'Adicionar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Visualizar */}
+      {visualizando && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className={`w-full max-w-md rounded-2xl border shadow-2xl ${c.modal}`}>
+            <div className={`flex items-center justify-between px-6 py-4 border-b ${isDark ? 'border-white/8' : 'border-gray-100'}`}>
+              <h2 className="text-base font-black">{visualizando.nome}</h2>
+              <button onClick={() => setVisualizando(null)} className={`p-1.5 rounded-lg ${isDark ? 'hover:bg-white/8' : 'hover:bg-gray-100'}`}>
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <span className={`inline-block text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full border ${STATUS_BADGE[visualizando.status]}`}>
+                {visualizando.status}
+              </span>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className={`text-xs font-bold uppercase tracking-widest mb-1 ${c.label}`}>Responsável</p>
+                  <p>{visualizando.responsavel || '—'}</p>
+                </div>
+                <div>
+                  <p className={`text-xs font-bold uppercase tracking-widest mb-1 ${c.label}`}>Regime</p>
+                  <p>{REGIMES.find(r => r.value === visualizando.regime)?.label ?? '—'}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <Phone size={13} className={c.muted} /> {visualizando.telefone || '—'}
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <Mail size={13} className={c.muted} /> {visualizando.email || '—'}
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <Building2 size={13} className={c.muted} />
+                {empresas.find(em => em.id === links[visualizando.id])?.nome || 'Nenhuma empresa vinculada'}
+              </div>
+              {visualizando.observacoes && (
+                <div>
+                  <p className={`text-xs font-bold uppercase tracking-widest mb-1 ${c.label}`}>Observações</p>
+                  <p className="text-sm leading-relaxed">{visualizando.observacoes}</p>
+                </div>
+              )}
+            </div>
+            <div className={`flex justify-end gap-3 px-6 py-4 border-t ${isDark ? 'border-white/8' : 'border-gray-100'}`}>
+              <button
+                onClick={() => { openModal(visualizando); setVisualizando(null); }}
+                className="px-5 py-2.5 text-sm font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition-colors"
+              >
+                Editar
               </button>
             </div>
           </div>

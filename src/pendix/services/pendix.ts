@@ -1,4 +1,6 @@
 import { supabase } from '../../app/services/supabase';
+import { readLocal, writeLocal } from '../lib/localStore';
+import { getPendixEmpresas } from './empresas';
 
 function getSessionUser(): { officeId?: string; role?: string; nome?: string } | null {
   try { return JSON.parse(localStorage.getItem('flash_user') || 'null'); }
@@ -20,9 +22,12 @@ function sessionOfficeId(): string | null {
 
 export type PendixClienteStatus = 'ativo' | 'inativo' | 'suspenso';
 export type PendixRegime = 'simples_nacional' | 'lucro_presumido' | 'lucro_real' | 'mei';
-export type PendixPendenciaStatus = 'pendente' | 'recebido' | 'em_analise' | 'rejeitado' | 'cancelado';
+export type PendixPendenciaStatus = 'pendente' | 'enviada' | 'recebida' | 'concluida' | 'vencida' | 'cancelada';
 export type PendixFrequencia = 'mensal' | 'trimestral' | 'anual' | 'unico';
 export type PendixPrioridade = 'baixa' | 'media' | 'alta' | 'urgente';
+export type PendixPendenciaTipo = 'cliente' | 'empresa';
+// Frequência de cobrança da pendência (campo novo, só local — ver bloco "Extras" abaixo)
+export type PendixFrequenciaCobranca = 'unica' | 'diaria' | 'a_cada_2_dias' | 'semanal' | 'quinzenal' | 'mensal';
 
 export interface PendixCliente {
   id: string;
@@ -195,7 +200,7 @@ export async function updatePendixPendenciaStatus(
   id: string, status: PendixPendenciaStatus, obs?: string
 ) {
   const payload: Record<string, unknown> = { status, updated_at: new Date().toISOString() };
-  if (status === 'recebido') payload.data_recebimento = new Date().toISOString();
+  if (status === 'recebida') payload.data_recebimento = new Date().toISOString();
   if (obs !== undefined) payload.observacoes = obs;
   const { data, error } = await supabase
     .from('pendix_pendencias').update(payload).eq('id', id).select().single();
@@ -203,9 +208,31 @@ export async function updatePendixPendenciaStatus(
   return data as PendixPendencia;
 }
 
+export async function updatePendixPendenciaCampos(
+  id: string,
+  p: Partial<Pick<PendixPendencia, 'nome_documento' | 'competencia' | 'data_limite' | 'observacoes'>>
+) {
+  const { data, error } = await supabase
+    .from('pendix_pendencias')
+    .update({ ...p, updated_at: new Date().toISOString() })
+    .eq('id', id).select('*, pendix_clientes(nome, telefone)').single();
+  if (error) throw error;
+  return data as PendixPendencia;
+}
+
+export async function getPendixPendenciaPorId(id: string) {
+  const { data, error } = await supabase
+    .from('pendix_pendencias')
+    .select('*, pendix_clientes(nome, telefone)')
+    .eq('id', id).single();
+  if (error) throw error;
+  return data as PendixPendencia;
+}
+
 export async function deletePendixPendencia(id: string) {
   const { error } = await supabase.from('pendix_pendencias').delete().eq('id', id);
   if (error) throw error;
+  deletePendenciaExtra(id);
 }
 
 export async function gerarPendenciasMes(clienteId: string, competencia: string) {
@@ -262,6 +289,45 @@ export async function addPendixHistorico(
   });
 }
 
+// ── Extras locais da pendência ───────────────────────────────────────────
+// `pendix_pendencias` no Supabase só tem as colunas originais (nome_documento,
+// cliente_id, competencia, status, data_limite, observacoes, arquivo_*).
+// Os campos novos do spec (tipo, empresa, prioridade, descrição, datas de
+// cobrança, anexo de exemplo) não têm coluna ainda, então ficam guardados
+// localmente por id da pendência — trocar por Supabase quando a coluna existir.
+
+const KEY_EXTRAS = 'pendix_mock_pendencia_extras_v1';
+
+export interface PendixPendenciaExtra {
+  tipo?: PendixPendenciaTipo;
+  empresa_id?: string;
+  descricao?: string;
+  prioridade?: PendixPrioridade;
+  data_inicio_cobranca?: string;
+  frequencia_cobranca?: PendixFrequenciaCobranca;
+  anexo_nome?: string;
+}
+
+function loadExtras(): Record<string, PendixPendenciaExtra> {
+  return readLocal(KEY_EXTRAS, {});
+}
+
+export function getPendenciaExtra(pendenciaId: string): PendixPendenciaExtra {
+  return loadExtras()[pendenciaId] ?? {};
+}
+
+export function savePendenciaExtra(pendenciaId: string, patch: PendixPendenciaExtra): void {
+  const all = loadExtras();
+  all[pendenciaId] = { ...all[pendenciaId], ...patch };
+  writeLocal(KEY_EXTRAS, all);
+}
+
+export function deletePendenciaExtra(pendenciaId: string): void {
+  const all = loadExtras();
+  delete all[pendenciaId];
+  writeLocal(KEY_EXTRAS, all);
+}
+
 // ── Stats helper ───────────────────────────────────────────────────────────
 
 export async function getPendixStats() {
@@ -272,17 +338,20 @@ export async function getPendixStats() {
 
   const today = new Date().toISOString().slice(0, 10);
 
-  const [clientes, abertas, vencidas, hoje] = await Promise.all([
-    applyFilter(supabase.from('pendix_clientes').select('id', { count: 'exact', head: true }).eq('status', 'ativo')),
-    applyFilter(supabase.from('pendix_pendencias').select('id', { count: 'exact', head: true }).in('status', ['pendente', 'em_analise'])),
-    applyFilter(supabase.from('pendix_pendencias').select('id', { count: 'exact', head: true }).in('status', ['pendente']).lt('data_limite', today)),
-    applyFilter(supabase.from('pendix_pendencias').select('id', { count: 'exact', head: true }).eq('status', 'recebido').gte('data_recebimento', today + 'T00:00:00Z')),
+  const [clientes, empresas, abertas, vencidasStatus, vencidasPendente, concluidas] = await Promise.all([
+    applyFilter(supabase.from('pendix_clientes').select('id', { count: 'exact', head: true })),
+    getPendixEmpresas(),
+    applyFilter(supabase.from('pendix_pendencias').select('id', { count: 'exact', head: true }).in('status', ['pendente', 'enviada', 'recebida'])),
+    applyFilter(supabase.from('pendix_pendencias').select('id', { count: 'exact', head: true }).eq('status', 'vencida')),
+    applyFilter(supabase.from('pendix_pendencias').select('id', { count: 'exact', head: true }).eq('status', 'pendente').lt('data_limite', today)),
+    applyFilter(supabase.from('pendix_pendencias').select('id', { count: 'exact', head: true }).eq('status', 'concluida')),
   ]);
 
   return {
-    clientesAtivos: clientes.count ?? 0,
+    totalClientes: clientes.count ?? 0,
+    totalEmpresas: empresas.filter(e => e.status === 'ativa').length,
     pendenciasAbertas: abertas.count ?? 0,
-    vencidas: vencidas.count ?? 0,
-    recebidosHoje: hoje.count ?? 0,
+    vencidas: (vencidasStatus.count ?? 0) + (vencidasPendente.count ?? 0),
+    concluidas: concluidas.count ?? 0,
   };
 }

@@ -34,6 +34,27 @@ function acaoColor(acao: string, isDark: boolean) {
   return isDark ? 'bg-white/8 text-gray-400' : 'bg-gray-100 text-gray-500';
 }
 
+type TipoAcao = 'criacao' | 'edicao' | 'status' | 'cobranca' | 'exclusao' | 'outro';
+
+const TIPO_OPTIONS: { value: TipoAcao; label: string }[] = [
+  { value: 'criacao',  label: 'Criação' },
+  { value: 'edicao',   label: 'Edição' },
+  { value: 'status',   label: 'Alteração de status' },
+  { value: 'cobranca', label: 'Cobrança' },
+  { value: 'exclusao', label: 'Exclusão' },
+  { value: 'outro',    label: 'Outros' },
+];
+
+function tipoDeAcao(acao: string): TipoAcao {
+  const a = acao.toLowerCase();
+  if (a.includes('cria') || a.includes('gera')) return 'criacao';
+  if (a.includes('whatsapp') || a.includes('cobran')) return 'cobranca';
+  if (a.includes('status')) return 'status';
+  if (a.includes('remov') || a.includes('exclu') || a.includes('cancel')) return 'exclusao';
+  if (a.includes('edit') || a.includes('atualiz')) return 'edicao';
+  return 'outro';
+}
+
 function groupByDate(entries: PendixHistoricoEntry[]) {
   const groups: Record<string, PendixHistoricoEntry[]> = {};
   for (const e of entries) {
@@ -53,6 +74,8 @@ export default function PendixHistorico() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterCliente, setFilterCliente] = useState('');
+  const [filterData, setFilterData] = useState('');
+  const [filterTipo, setFilterTipo] = useState<TipoAcao | ''>('');
 
   const c = {
     page:   isDark ? 'text-gray-200'               : 'text-gray-900',
@@ -83,12 +106,16 @@ export default function PendixHistorico() {
 
   useEffect(() => { load(); }, [filterCliente]);
 
-  const filtered = historico.filter(e =>
-    !search ||
-    e.acao.toLowerCase().includes(search.toLowerCase()) ||
-    (e.descricao ?? '').toLowerCase().includes(search.toLowerCase()) ||
-    (e.usuario_nome ?? '').toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = historico.filter(e => {
+    if (filterTipo && tipoDeAcao(e.acao) !== filterTipo) return false;
+    if (filterData && e.created_at.slice(0, 10) !== filterData) return false;
+    if (!search) return true;
+    return (
+      e.acao.toLowerCase().includes(search.toLowerCase()) ||
+      (e.descricao ?? '').toLowerCase().includes(search.toLowerCase()) ||
+      (e.usuario_nome ?? '').toLowerCase().includes(search.toLowerCase())
+    );
+  });
 
   const groups = groupByDate(filtered);
 
@@ -110,8 +137,8 @@ export default function PendixHistorico() {
       </div>
 
       {/* Filtros */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
-        <div className="relative">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <div className="relative md:col-span-1">
           <Search size={13} className={`absolute left-3 top-1/2 -translate-y-1/2 ${c.muted}`} />
           <input
             value={search} onChange={e => setSearch(e.target.value)}
@@ -126,6 +153,17 @@ export default function PendixHistorico() {
           <option value="">Todos os clientes</option>
           {clientes.map(cl => <option key={cl.id} value={cl.id}>{cl.nome}</option>)}
         </select>
+        <select
+          value={filterTipo} onChange={e => setFilterTipo(e.target.value as TipoAcao | '')}
+          className={`rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.select}`}
+        >
+          <option value="">Todos os tipos de ação</option>
+          {TIPO_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+        <input
+          type="date" value={filterData} onChange={e => setFilterData(e.target.value)}
+          className={`rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.input}`}
+        />
       </div>
 
       {/* Timeline */}
