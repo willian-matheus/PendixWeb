@@ -80,6 +80,7 @@ export interface PendixPendencia {
   tentativas_reenvio?: number;
   ultima_mensagem_enviada_em?: string;
   requer_revisao_humana?: boolean;
+  origem?: 'manual' | 'whatsapp' | 'automatico';
   created_at: string;
   updated_at: string;
   pendix_clientes?: { nome: string; telefone?: string };

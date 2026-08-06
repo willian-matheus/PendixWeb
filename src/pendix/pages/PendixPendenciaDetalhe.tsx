@@ -151,6 +151,11 @@ export default function PendixPendenciaDetalhe() {
             <span className={`text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full border flex items-center gap-1.5 ${cfg.color}`}>
               <StatusIcon size={11} /> {cfg.label}
             </span>
+            {pendencia.origem === 'whatsapp' && (
+              <span className="text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full border flex items-center gap-1.5 bg-emerald-500/15 text-emerald-400 border-emerald-500/20">
+                <MessageCircle size={11} /> Via WhatsApp
+              </span>
+            )}
             {extra.prioridade && (
               <span className="text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full border bg-purple-500/15 text-purple-400 border-purple-500/20">
                 Prioridade {PRIORIDADE_LABEL[extra.prioridade]}

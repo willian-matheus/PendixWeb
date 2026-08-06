@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import {
   Search, MessageCircle, CheckCircle2, XCircle, Ban,
-  Eye, Edit2, Trash2, RefreshCw, Plus, X, Clock, Paperclip,
+  Eye, Edit2, Trash2, RefreshCw, Plus, X, Clock, Paperclip, Smartphone,
 } from 'lucide-react';
 import { useTheme } from '../../app/theme/ThemeProvider';
 import { toast } from 'sonner';
@@ -400,6 +400,11 @@ export default function PendixPendencias() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-semibold truncate">{p.nome_documento}</p>
+                    {p.origem === 'whatsapp' && (
+                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full border uppercase tracking-widest shrink-0 bg-emerald-500/15 text-emerald-400 border-emerald-500/20 flex items-center gap-1">
+                        <Smartphone size={8} /> WhatsApp
+                      </span>
+                    )}
                     {prio && (
                       <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full border uppercase tracking-widest shrink-0 ${prio.color}`}>
                         {prio.label}

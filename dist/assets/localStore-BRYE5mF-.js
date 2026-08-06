@@ -1,0 +1,1 @@
+function n(r,t){try{const e=localStorage.getItem(r);return e?JSON.parse(e):t}catch{return t}}function o(r,t){localStorage.setItem(r,JSON.stringify(t))}function a(){return`${Date.now().toString(36)}${Math.random().toString(36).slice(2,9)}`}export{n as r,a as u,o as w};
