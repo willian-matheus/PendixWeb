@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router';
 import {
-  ArrowLeft, Clock, Send, CheckCircle2, CheckCheck, AlertTriangle, XCircle,
+  ArrowLeft, Clock, CheckCircle2, XCircle, Ban,
   Building2, User, Phone, Mail, Paperclip, MessageCircle, FileText,
-  PenSquare, PlusCircle, ClipboardCheck,
+  PenSquare, PlusCircle,
 } from 'lucide-react';
 import { useTheme } from '../../app/theme/ThemeProvider';
 import { toast } from 'sonner';
@@ -14,12 +14,11 @@ import {
 import { getPendixEmpresas, type PendixEmpresa } from '../services/empresas';
 
 const STATUS_CONFIG: Record<PendixPendenciaStatus, { label: string; color: string; icon: React.ComponentType<any> }> = {
-  pendente:  { label: 'Pendente',   color: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/20',   icon: Clock },
-  enviada:   { label: 'Enviada',    color: 'bg-blue-500/15 text-blue-400 border-blue-500/20',          icon: Send },
-  recebida:  { label: 'Recebida',   color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20', icon: CheckCircle2 },
-  concluida: { label: 'Concluída',  color: 'bg-green-500/15 text-green-400 border-green-500/20',       icon: CheckCheck },
-  vencida:   { label: 'Vencida',    color: 'bg-red-500/15 text-red-400 border-red-500/20',              icon: AlertTriangle },
-  cancelada: { label: 'Cancelada',  color: 'bg-gray-500/15 text-gray-400 border-gray-500/20',           icon: XCircle },
+  pendente:   { label: 'Pendente',   color: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/20',    icon: Clock },
+  em_analise: { label: 'Em Análise', color: 'bg-blue-500/15 text-blue-400 border-blue-500/20',          icon: MessageCircle },
+  recebido:   { label: 'Recebido',   color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20', icon: CheckCircle2 },
+  rejeitado:  { label: 'Rejeitado',  color: 'bg-red-500/15 text-red-400 border-red-500/20',              icon: XCircle },
+  cancelado:  { label: 'Cancelado',  color: 'bg-gray-500/15 text-gray-400 border-gray-500/20',           icon: Ban },
 };
 
 const PRIORIDADE_LABEL: Record<string, string> = { baixa: 'Baixa', media: 'Média', alta: 'Alta', urgente: 'Urgente' };
@@ -29,11 +28,9 @@ const FREQ_LABEL: Record<string, string> = {
 };
 
 const TIMELINE_STEPS: { key: PendixPendenciaStatus | 'criada'; label: string; icon: React.ComponentType<any> }[] = [
-  { key: 'criada',    label: 'Pendência criada',      icon: PlusCircle },
-  { key: 'enviada',   label: 'Cobrança enviada',       icon: Send },
-  { key: 'recebida',  label: 'Cliente respondeu',      icon: MessageCircle },
-  { key: 'recebida',  label: 'Documento recebido',     icon: FileText },
-  { key: 'concluida', label: 'Pendência concluída',    icon: ClipboardCheck },
+  { key: 'criada',     label: 'Pendência criada',        icon: PlusCircle },
+  { key: 'em_analise', label: 'Cliente respondeu / em análise', icon: MessageCircle },
+  { key: 'recebido',   label: 'Documento recebido',       icon: FileText },
 ];
 
 export default function PendixPendenciaDetalhe() {
@@ -126,17 +123,16 @@ export default function PendixPendenciaDetalhe() {
     const num = '55' + tel.replace(/\D/g, '');
     const msg = encodeURIComponent(`Olá, identificamos que ainda não recebemos "${pendencia.nome_documento}". Por favor, envie o documento para prosseguirmos.`);
     window.open(`https://wa.me/${num}?text=${msg}`, '_blank');
-    if (pendencia.status === 'pendente') changeStatus('enviada');
   }
 
-  // Timeline fake — passos alcançados de acordo com o status atual.
-  const ordem: PendixPendenciaStatus[] = ['pendente', 'enviada', 'recebida', 'concluida'];
-  const posicaoAtual = pendencia.status === 'cancelada' || pendencia.status === 'vencida' ? -1 : ordem.indexOf(pendencia.status);
-  const stepAlcancado = (key: string, idx: number) => {
+  // Timeline — passos alcançados de acordo com o status atual.
+  const ordem: PendixPendenciaStatus[] = ['pendente', 'em_analise', 'recebido'];
+  const posicaoAtual = pendencia.status === 'cancelado' || pendencia.status === 'rejeitado' ? -1 : ordem.indexOf(pendencia.status);
+  const stepAlcancado = (key: string) => {
     if (key === 'criada') return true;
     if (posicaoAtual === -1) return false;
     const idxOrdem = ordem.indexOf(key as PendixPendenciaStatus);
-    return idxOrdem !== -1 && idxOrdem <= posicaoAtual && idx <= (posicaoAtual + 2);
+    return idxOrdem !== -1 && idxOrdem <= posicaoAtual;
   };
 
   return (
@@ -210,7 +206,7 @@ export default function PendixPendenciaDetalhe() {
             <p className={`text-xs font-bold uppercase tracking-widest mb-5 ${c.label}`}>Timeline</p>
             <div className="space-y-0">
               {TIMELINE_STEPS.map((step, idx) => {
-                const alcancado = stepAlcancado(step.key, idx);
+                const alcancado = stepAlcancado(step.key);
                 const Icon = step.icon;
                 return (
                   <div key={idx} className="flex gap-4">

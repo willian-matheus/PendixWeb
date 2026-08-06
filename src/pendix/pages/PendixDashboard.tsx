@@ -17,20 +17,19 @@ import {
 } from '../services/pendix';
 
 const STATUS_LABEL: Record<string, string> = {
-  pendente: 'Pendente', enviada: 'Enviada', recebida: 'Recebida',
-  concluida: 'Concluída', vencida: 'Vencida', cancelada: 'Cancelada',
+  pendente: 'Pendente', em_analise: 'Em Análise', recebido: 'Recebido',
+  rejeitado: 'Rejeitado', cancelado: 'Cancelado',
 };
 const STATUS_COLOR: Record<string, string> = {
-  pendente:  'bg-yellow-500/15 text-yellow-400 border-yellow-500/20',
-  enviada:   'bg-blue-500/15 text-blue-400 border-blue-500/20',
-  recebida:  'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
-  concluida: 'bg-green-500/15 text-green-400 border-green-500/20',
-  vencida:   'bg-red-500/15 text-red-400 border-red-500/20',
-  cancelada: 'bg-gray-500/15 text-gray-400 border-gray-500/20',
+  pendente:   'bg-yellow-500/15 text-yellow-400 border-yellow-500/20',
+  em_analise: 'bg-blue-500/15 text-blue-400 border-blue-500/20',
+  recebido:   'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
+  rejeitado:  'bg-red-500/15 text-red-400 border-red-500/20',
+  cancelado:  'bg-gray-500/15 text-gray-400 border-gray-500/20',
 };
 const STATUS_HEX: Record<string, string> = {
-  pendente: '#eab308', enviada: '#3b82f6', recebida: '#10b981',
-  concluida: '#22c55e', vencida: '#ef4444', cancelada: '#6b7280',
+  pendente: '#eab308', em_analise: '#3b82f6', recebido: '#10b981',
+  rejeitado: '#ef4444', cancelado: '#6b7280',
 };
 const PRIORIDADE_LABEL: Record<string, string> = { baixa: 'Baixa', media: 'Média', alta: 'Alta', urgente: 'Urgente' };
 const PRIORIDADE_HEX: Record<string, string> = { baixa: '#6b7280', media: '#3b82f6', alta: '#f97316', urgente: '#ef4444' };
@@ -135,7 +134,7 @@ export default function PendixDashboard() {
   const porMesData = useMemo(() => ultimosMesesFake(), []);
 
   const proximasCobrancas = pendencias
-    .filter(p => p.data_limite && (p.status === 'pendente' || p.status === 'enviada'))
+    .filter(p => p.data_limite && (p.status === 'pendente' || p.status === 'em_analise'))
     .sort((a, b) => (a.data_limite! < b.data_limite! ? -1 : 1))
     .slice(0, 6);
 

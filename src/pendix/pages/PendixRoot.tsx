@@ -3,10 +3,12 @@ import { useAuth } from '../../app/auth/AuthProvider';
 import { useEffect, useState } from 'react';
 import {
   LayoutDashboard, Users, Building2, ClipboardList, History, Bell, Settings,
-  ChevronRight, LogOut, ClipboardCheck, X,
+  ChevronRight, LogOut, X,
 } from 'lucide-react';
 import { Toaster } from 'sonner';
 import Topbar from '../components/Topbar';
+import PendixLogo from '../components/PendixLogo';
+import PendixWordmark from '../components/PendixWordmark';
 
 const NAV = [
   { icon: LayoutDashboard, label: 'Dashboard',     path: '/pendix/app' },
@@ -25,7 +27,7 @@ function usePendixMeta() {
     const prevFavicon = favicon?.href ?? '';
 
     document.title = 'Pendix';
-    if (favicon) favicon.href = '/pendix-favicon.svg';
+    if (favicon) favicon.href = '/pendix/logo-icon-white.png';
 
     return () => {
       document.title = prevTitle;
@@ -46,10 +48,8 @@ export default function PendixRoot() {
     <>
       {/* Logo */}
       <div className="p-5 border-b border-white/[0.06] flex items-center gap-3">
-        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-500 to-violet-700 flex items-center justify-center shadow-[0_0_16px_rgba(139,92,246,0.4)] shrink-0">
-          <ClipboardCheck size={18} className="text-white" />
-        </div>
-        <span className="text-xl font-black tracking-[0.12em] uppercase text-white">PENDIX</span>
+        <PendixLogo variant="white" size={36} className="shrink-0" />
+        <PendixWordmark size={22} />
         <button
           onClick={() => setMobileOpen(false)}
           className="lg:hidden ml-auto p-1.5 rounded-lg text-gray-500 hover:bg-white/5 hover:text-white transition-colors"

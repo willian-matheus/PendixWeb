@@ -21,8 +21,11 @@ function sessionOfficeId(): string | null {
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export type PendixClienteStatus = 'ativo' | 'inativo' | 'suspenso';
+export type PendixClienteTipo = 'pessoa' | 'empresa';
 export type PendixRegime = 'simples_nacional' | 'lucro_presumido' | 'lucro_real' | 'mei';
-export type PendixPendenciaStatus = 'pendente' | 'enviada' | 'recebida' | 'concluida' | 'vencida' | 'cancelada';
+// Schema compartilhado com o PendixApp (mobile) — ver supabase/migrations/0005_pendix_app_schema.sql
+export type PendixPendenciaStatus = 'pendente' | 'em_analise' | 'recebido' | 'rejeitado' | 'cancelado';
+export type PendixNivelCobranca = 'amigavel' | 'lembrete' | 'urgente' | 'critico';
 export type PendixFrequencia = 'mensal' | 'trimestral' | 'anual' | 'unico';
 export type PendixPrioridade = 'baixa' | 'media' | 'alta' | 'urgente';
 export type PendixPendenciaTipo = 'cliente' | 'empresa';
@@ -38,6 +41,8 @@ export interface PendixCliente {
   email: string;
   regime: PendixRegime;
   status: PendixClienteStatus;
+  tipo?: PendixClienteTipo;
+  consentimento_whatsapp?: boolean;
   observacoes: string;
   created_at: string;
   updated_at: string;
@@ -52,6 +57,9 @@ export interface PendixDocConfig {
   dia_limite: number;
   prioridade: PendixPrioridade;
   ativo: boolean;
+  descricao_whatsapp?: string;
+  arquivo_modelo_url?: string;
+  arquivo_modelo_nome?: string;
   created_at: string;
 }
 
@@ -68,6 +76,10 @@ export interface PendixPendencia {
   observacoes?: string;
   data_limite?: string;
   data_recebimento?: string;
+  nivel_cobranca_atual?: PendixNivelCobranca;
+  tentativas_reenvio?: number;
+  ultima_mensagem_enviada_em?: string;
+  requer_revisao_humana?: boolean;
   created_at: string;
   updated_at: string;
   pendix_clientes?: { nome: string; telefone?: string };
@@ -200,7 +212,7 @@ export async function updatePendixPendenciaStatus(
   id: string, status: PendixPendenciaStatus, obs?: string
 ) {
   const payload: Record<string, unknown> = { status, updated_at: new Date().toISOString() };
-  if (status === 'recebida') payload.data_recebimento = new Date().toISOString();
+  if (status === 'recebido') payload.data_recebimento = new Date().toISOString();
   if (obs !== undefined) payload.observacoes = obs;
   const { data, error } = await supabase
     .from('pendix_pendencias').update(payload).eq('id', id).select().single();
@@ -233,6 +245,16 @@ export async function deletePendixPendencia(id: string) {
   const { error } = await supabase.from('pendix_pendencias').delete().eq('id', id);
   if (error) throw error;
   deletePendenciaExtra(id);
+}
+
+// `arquivo_url` guarda o caminho no bucket privado `pendix-anexos` (não uma URL pública) —
+// gera uma URL assinada de curta duração pra exibir/baixar o anexo.
+export async function getPendixAnexoUrl(path: string, expiresInSeconds = 3600) {
+  const { data, error } = await supabase.storage
+    .from('pendix-anexos')
+    .createSignedUrl(path, expiresInSeconds);
+  if (error) throw error;
+  return data.signedUrl;
 }
 
 export async function gerarPendenciasMes(clienteId: string, competencia: string) {
@@ -338,20 +360,20 @@ export async function getPendixStats() {
 
   const today = new Date().toISOString().slice(0, 10);
 
-  const [clientes, empresas, abertas, vencidasStatus, vencidasPendente, concluidas] = await Promise.all([
+  const [clientes, empresas, abertas, vencidasPendente, concluidas] = await Promise.all([
     applyFilter(supabase.from('pendix_clientes').select('id', { count: 'exact', head: true })),
     getPendixEmpresas(),
-    applyFilter(supabase.from('pendix_pendencias').select('id', { count: 'exact', head: true }).in('status', ['pendente', 'enviada', 'recebida'])),
-    applyFilter(supabase.from('pendix_pendencias').select('id', { count: 'exact', head: true }).eq('status', 'vencida')),
+    applyFilter(supabase.from('pendix_pendencias').select('id', { count: 'exact', head: true }).in('status', ['pendente', 'em_analise'])),
+    // "vencida" não é mais um status guardado — é calculado (pendente + data_limite no passado)
     applyFilter(supabase.from('pendix_pendencias').select('id', { count: 'exact', head: true }).eq('status', 'pendente').lt('data_limite', today)),
-    applyFilter(supabase.from('pendix_pendencias').select('id', { count: 'exact', head: true }).eq('status', 'concluida')),
+    applyFilter(supabase.from('pendix_pendencias').select('id', { count: 'exact', head: true }).eq('status', 'recebido')),
   ]);
 
   return {
     totalClientes: clientes.count ?? 0,
     totalEmpresas: empresas.filter(e => e.status === 'ativa').length,
     pendenciasAbertas: abertas.count ?? 0,
-    vencidas: (vencidasStatus.count ?? 0) + (vencidasPendente.count ?? 0),
+    vencidas: vencidasPendente.count ?? 0,
     concluidas: concluidas.count ?? 0,
   };
 }

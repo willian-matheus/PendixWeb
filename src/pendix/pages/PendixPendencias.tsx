@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import {
-  Search, MessageCircle, CheckCircle2, XCircle, Send, CheckCheck, AlertTriangle,
+  Search, MessageCircle, CheckCircle2, XCircle, Ban,
   Eye, Edit2, Trash2, RefreshCw, Plus, X, Clock, Paperclip,
 } from 'lucide-react';
 import { useTheme } from '../../app/theme/ThemeProvider';
@@ -20,12 +20,11 @@ import {
 } from '../../app/components/ui/alert-dialog';
 
 const STATUS_CONFIG: Record<PendixPendenciaStatus, { label: string; color: string; icon: React.ComponentType<any> }> = {
-  pendente:  { label: 'Pendente',   color: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/20',   icon: Clock },
-  enviada:   { label: 'Enviada',    color: 'bg-blue-500/15 text-blue-400 border-blue-500/20',          icon: Send },
-  recebida:  { label: 'Recebida',   color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20', icon: CheckCircle2 },
-  concluida: { label: 'Concluída',  color: 'bg-green-500/15 text-green-400 border-green-500/20',       icon: CheckCheck },
-  vencida:   { label: 'Vencida',    color: 'bg-red-500/15 text-red-400 border-red-500/20',              icon: AlertTriangle },
-  cancelada: { label: 'Cancelada',  color: 'bg-gray-500/15 text-gray-400 border-gray-500/20',           icon: XCircle },
+  pendente:   { label: 'Pendente',   color: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/20',    icon: Clock },
+  em_analise: { label: 'Em Análise', color: 'bg-blue-500/15 text-blue-400 border-blue-500/20',          icon: MessageCircle },
+  recebido:   { label: 'Recebido',   color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20', icon: CheckCircle2 },
+  rejeitado:  { label: 'Rejeitado',  color: 'bg-red-500/15 text-red-400 border-red-500/20',              icon: XCircle },
+  cancelado:  { label: 'Cancelado',  color: 'bg-gray-500/15 text-gray-400 border-gray-500/20',           icon: Ban },
 };
 
 const PRIORIDADE_OPTIONS: { value: PendixPrioridade; label: string; color: string }[] = [
@@ -185,7 +184,6 @@ export default function PendixPendencias() {
       `Olá, identificamos que ainda não recebemos "${p.nome_documento}" referente à competência ${p.competencia}. Por favor, envie o documento para prosseguirmos.`
     );
     window.open(`https://wa.me/${num}?text=${msg}`, '_blank');
-    if (p.status === 'pendente') changeStatus(p, 'enviada');
     addPendixHistorico({
       escritorio_id: p.escritorio_id, pendencia_id: p.id, cliente_id: p.cliente_id,
       acao: 'Cobrança enviada via WhatsApp',
@@ -288,10 +286,10 @@ export default function PendixPendencias() {
 
   const counts = {
     pendente: pendencias.filter(p => p.status === 'pendente').length,
-    enviada: pendencias.filter(p => p.status === 'enviada').length,
-    recebida: pendencias.filter(p => p.status === 'recebida').length,
-    concluida: pendencias.filter(p => p.status === 'concluida').length,
-    vencida: pendencias.filter(p => p.status === 'vencida').length,
+    em_analise: pendencias.filter(p => p.status === 'em_analise').length,
+    recebido: pendencias.filter(p => p.status === 'recebido').length,
+    rejeitado: pendencias.filter(p => p.status === 'rejeitado').length,
+    cancelado: pendencias.filter(p => p.status === 'cancelado').length,
   };
 
   return (
@@ -417,14 +415,8 @@ export default function PendixPendencias() {
                   <span className={`text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full border mr-1 ${cfg.color}`}>
                     {cfg.label}
                   </span>
-                  {p.status === 'pendente' && (
-                    <button onClick={() => changeStatus(p, 'enviada')} disabled={atualizando === p.id} title="Marcar como enviada"
-                      className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-gray-500 hover:text-blue-400 hover:bg-blue-500/10' : 'text-gray-400 hover:text-blue-600 hover:bg-blue-50'}`}>
-                      <Send size={13} />
-                    </button>
-                  )}
-                  {(p.status === 'pendente' || p.status === 'enviada') && (
-                    <button onClick={() => changeStatus(p, 'recebida')} disabled={atualizando === p.id} title="Marcar como recebida"
+                  {(p.status === 'pendente' || p.status === 'em_analise') && (
+                    <button onClick={() => changeStatus(p, 'recebido')} disabled={atualizando === p.id} title="Marcar como recebido"
                       className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-gray-500 hover:text-emerald-400 hover:bg-emerald-500/10' : 'text-gray-400 hover:text-emerald-600 hover:bg-emerald-50'}`}>
                       <CheckCircle2 size={13} />
                     </button>

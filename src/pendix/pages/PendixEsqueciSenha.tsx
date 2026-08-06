@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router';
-import { ArrowRight, Mail, ClipboardList, CheckCircle2 } from 'lucide-react';
+import { ArrowRight, Mail, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '../../app/auth/AuthProvider';
+import PendixLogo from '../components/PendixLogo';
+import PendixWordmark from '../components/PendixWordmark';
+import PendixTagline from '../components/PendixTagline';
 
 function usePendixMeta() {
   useEffect(() => {
@@ -9,7 +12,7 @@ function usePendixMeta() {
     const favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
     const prevFavicon = favicon?.href ?? '';
     document.title = 'Pendix — Recuperar senha';
-    if (favicon) favicon.href = '/pendix-favicon.svg';
+    if (favicon) favicon.href = '/pendix/logo-icon-white.png';
     return () => {
       document.title = prevTitle;
       if (favicon) favicon.href = prevFavicon;
@@ -50,12 +53,10 @@ export default function PendixEsqueciSenha() {
       <div className="relative z-10 w-full max-w-sm">
         <div className="text-center mb-10">
           <div className="inline-flex items-center gap-3 mb-3">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-purple-500 to-violet-700 flex items-center justify-center shadow-[0_0_24px_rgba(139,92,246,0.45)]">
-              <ClipboardList size={22} className="text-white" />
-            </div>
-            <span className="text-4xl font-black tracking-[0.12em] uppercase">PENDIX</span>
+            <PendixLogo variant="white" size={44} />
+            <PendixWordmark size={40} />
           </div>
-          <p className="text-xs text-purple-400/60 tracking-[0.25em] uppercase">Gestão de Pendências</p>
+          <PendixTagline className="text-xs text-purple-400/60">Gestão de Pendências</PendixTagline>
         </div>
 
         <div className="bg-white/[0.03] border border-white/8 rounded-2xl p-8 backdrop-blur-md shadow-[0_8px_40px_rgba(0,0,0,0.5)]">
