@@ -1,19 +1,15 @@
 import { useState } from 'react';
 import { User, Lock, Palette, CreditCard, Sun, Moon, LogOut, Check } from 'lucide-react';
 import { useTheme } from '../../app/theme/ThemeProvider';
+import { useAccentColor, ACCENT_COLORS, type AccentColorId } from '../../app/theme/AccentColorProvider';
 import { useAuth } from '../../app/auth/AuthProvider';
 import { toast } from 'sonner';
-import { readLocal, writeLocal } from '../lib/localStore';
 
-const CORES = [
-  { id: 'roxo', label: 'Roxo', hex: '#8b5cf6', className: 'bg-purple-500' },
-  { id: 'azul', label: 'Azul', hex: '#3b82f6', className: 'bg-blue-500' },
-  { id: 'verde', label: 'Verde', hex: '#10b981', className: 'bg-emerald-500' },
-  { id: 'laranja', label: 'Laranja', hex: '#f97316', className: 'bg-orange-500' },
-];
+const CORES = (Object.keys(ACCENT_COLORS) as AccentColorId[]).map(id => ({ id, ...ACCENT_COLORS[id] }));
 
 export default function PendixConfiguracoes() {
   const { theme, toggleTheme } = useTheme();
+  const { accent, setAccent } = useAccentColor();
   const { user, signOut, updatePassword } = useAuth();
   const isDark = theme === 'dark';
 
@@ -26,8 +22,6 @@ export default function PendixConfiguracoes() {
   const [novaSenha, setNovaSenha] = useState('');
   const [confirmarSenha, setConfirmarSenha] = useState('');
   const [savingSenha, setSavingSenha] = useState(false);
-
-  const [corPrincipal, setCorPrincipal] = useState(() => readLocal('pendix_cor_principal', 'roxo'));
 
   const c = {
     page:  isDark ? 'text-gray-200' : 'text-gray-900',
@@ -61,13 +55,12 @@ export default function PendixConfiguracoes() {
     }
   }
 
-  function handleSelecionarCor(id: string) {
-    setCorPrincipal(id);
-    writeLocal('pendix_cor_principal', id);
-    toast.success('Cor principal salva como preferência');
+  function handleSelecionarCor(id: AccentColorId) {
+    setAccent(id);
+    toast.success('Cor principal atualizada');
   }
 
-  const corSelecionada = CORES.find(cr => cr.id === corPrincipal) ?? CORES[0];
+  const corSelecionada = ACCENT_COLORS[accent];
   const plano = user?.plano === 'pro' ? 'Pro' : 'Normal';
 
   return (
@@ -166,14 +159,14 @@ export default function PendixConfiguracoes() {
                 key={cr.id}
                 onClick={() => handleSelecionarCor(cr.id)}
                 title={cr.label}
-                className={`relative w-9 h-9 rounded-full ${cr.className} flex items-center justify-center transition-transform hover:scale-110 ${corPrincipal === cr.id ? 'ring-2 ring-offset-2 ring-offset-transparent ring-white/60' : ''}`}
+                className={`relative w-9 h-9 rounded-full ${cr.className} flex items-center justify-center transition-transform hover:scale-110 ${accent === cr.id ? 'ring-2 ring-offset-2 ring-offset-transparent ring-white/60' : ''}`}
               >
-                {corPrincipal === cr.id && <Check size={15} className="text-white" />}
+                {accent === cr.id && <Check size={15} className="text-white" />}
               </button>
             ))}
           </div>
           <div className={`rounded-xl border p-4 flex items-center gap-3 ${isDark ? 'bg-white/3 border-white/5' : 'bg-gray-50 border-gray-100'}`}>
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: corSelecionada.hex }}>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: corSelecionada.from }}>
               <Palette size={14} className="text-white" />
             </div>
             <div>

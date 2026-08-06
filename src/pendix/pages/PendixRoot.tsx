@@ -1,8 +1,10 @@
 import { Outlet, Link, useLocation } from 'react-router';
 import { useAuth } from '../../app/auth/AuthProvider';
+import { useTheme } from '../../app/theme/ThemeProvider';
+import { useAccentColor, ACCENT_COLORS } from '../../app/theme/AccentColorProvider';
 import { useEffect, useState } from 'react';
 import {
-  LayoutDashboard, Users, Building2, ClipboardList, History, Bell, Settings,
+  LayoutDashboard, Users, Building2, ClipboardList, CalendarDays, History, Bell, Settings,
   ChevronRight, LogOut, X,
 } from 'lucide-react';
 import { Toaster } from 'sonner';
@@ -15,6 +17,7 @@ const NAV = [
   { icon: Users,           label: 'Clientes',      path: '/pendix/app/clientes' },
   { icon: Building2,       label: 'Empresas',      path: '/pendix/app/empresas' },
   { icon: ClipboardList,   label: 'Pendências',    path: '/pendix/app/pendencias' },
+  { icon: CalendarDays,    label: 'Calendário',    path: '/pendix/app/calendario' },
   { icon: History,         label: 'Histórico',     path: '/pendix/app/historico' },
   { icon: Bell,            label: 'Notificações',  path: '/pendix/app/notificacoes' },
   { icon: Settings,        label: 'Configurações', path: '/pendix/app/configuracoes' },
@@ -40,19 +43,36 @@ export default function PendixRoot() {
   usePendixMeta();
   const location = useLocation();
   const { user, signOut } = useAuth();
+  const { theme } = useTheme();
+  const { accent } = useAccentColor();
+  const accentColor = ACCENT_COLORS[accent];
+  const isDark = theme === 'dark';
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => { setMobileOpen(false); }, [location.pathname]);
 
+  const c = {
+    page:        isDark ? 'bg-[#06000f] text-gray-200'        : 'bg-gray-50 text-gray-900',
+    sidebar:     isDark ? 'bg-[#08000f] border-white/[0.06]'   : 'bg-white border-gray-200',
+    border:      isDark ? 'border-white/[0.06]'                : 'border-gray-100',
+    navLabel:    isDark ? 'text-gray-700'                      : 'text-gray-400',
+    navInactive: isDark ? 'text-gray-500 hover:bg-white/5 hover:text-gray-200' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900',
+    navIcon:     isDark ? 'text-gray-600 group-hover:text-gray-400' : 'text-gray-400 group-hover:text-gray-600',
+    userCard:    isDark ? 'bg-white/[0.03] border-white/8'     : 'bg-gray-50 border-gray-200',
+    userName:    isDark ? 'text-white'                         : 'text-gray-900',
+    userRole:    isDark ? 'text-gray-600'                      : 'text-gray-500',
+    closeBtn:    isDark ? 'text-gray-500 hover:bg-white/5 hover:text-white' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900',
+  };
+
   const SidebarContent = (
     <>
       {/* Logo */}
-      <div className="p-5 border-b border-white/[0.06] flex items-center gap-3">
-        <PendixLogo variant="white" size={36} className="shrink-0" />
-        <PendixWordmark size={22} />
+      <div className={`p-5 border-b flex items-center gap-4 ${c.border}`}>
+        <PendixLogo variant={isDark ? 'white' : 'black'} size={40} className="shrink-0" />
+        <PendixWordmark size={30} color={isDark ? '#ffffff' : '#091426'} />
         <button
           onClick={() => setMobileOpen(false)}
-          className="lg:hidden ml-auto p-1.5 rounded-lg text-gray-500 hover:bg-white/5 hover:text-white transition-colors"
+          className={`lg:hidden ml-auto p-1.5 rounded-lg transition-colors ${c.closeBtn}`}
         >
           <X size={16} />
         </button>
@@ -60,7 +80,7 @@ export default function PendixRoot() {
 
       {/* Nav label */}
       <div className="px-5 pt-5 pb-2">
-        <p className="text-[9px] font-black uppercase tracking-[0.22em] text-gray-700">Menu</p>
+        <p className={`text-[9px] font-black uppercase tracking-[0.22em] ${c.navLabel}`}>Menu</p>
       </div>
 
       {/* Nav items */}
@@ -77,13 +97,12 @@ export default function PendixRoot() {
                 key={item.path}
                 to={item.path}
                 className={`flex items-center justify-between px-3 py-2.5 rounded-xl transition-all group ${
-                  isActive
-                    ? 'bg-gradient-to-r from-purple-600 to-violet-600 text-white shadow-[0_4px_15px_rgba(139,92,246,0.3)]'
-                    : 'text-gray-500 hover:bg-white/5 hover:text-gray-200'
+                  isActive ? 'text-white shadow-[0_4px_15px_rgba(139,92,246,0.3)]' : c.navInactive
                 }`}
+                style={isActive ? { backgroundImage: `linear-gradient(to right, ${accentColor.from}, ${accentColor.to})` } : undefined}
               >
                 <div className="flex items-center gap-3">
-                  <Icon size={17} className={isActive ? 'text-white' : 'text-gray-600 group-hover:text-gray-400'} />
+                  <Icon size={17} className={isActive ? 'text-white' : c.navIcon} />
                   <span className={`text-sm ${isActive ? 'font-semibold' : 'font-medium'} tracking-wide`}>
                     {item.label}
                   </span>
@@ -96,8 +115,8 @@ export default function PendixRoot() {
       </nav>
 
       {/* User card */}
-      <div className="p-3 border-t border-white/[0.06]">
-        <div className="bg-white/[0.03] border border-white/8 rounded-xl p-3 flex items-center justify-between">
+      <div className={`p-3 border-t ${c.border}`}>
+        <div className={`rounded-xl border p-3 flex items-center justify-between ${c.userCard}`}>
           <div className="flex items-center gap-2.5 overflow-hidden">
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-700 to-violet-900 border border-purple-500/20 flex items-center justify-center shrink-0">
               <span className="text-xs font-bold text-purple-200">
@@ -105,8 +124,8 @@ export default function PendixRoot() {
               </span>
             </div>
             <div className="overflow-hidden">
-              <p className="text-xs font-bold text-white truncate w-28">{user?.nome || 'Usuário'}</p>
-              <p className="text-[9px] text-gray-600 uppercase tracking-wider truncate w-28">
+              <p className={`text-xs font-bold truncate w-28 ${c.userName}`}>{user?.nome || 'Usuário'}</p>
+              <p className={`text-[9px] uppercase tracking-wider truncate w-28 ${c.userRole}`}>
                 {user?.role?.replace('_', ' ') || ''}
               </p>
             </div>
@@ -114,7 +133,7 @@ export default function PendixRoot() {
           <button
             onClick={() => signOut()}
             title="Sair"
-            className="text-gray-700 hover:text-red-400 transition-colors shrink-0"
+            className={`shrink-0 transition-colors ${isDark ? 'text-gray-700 hover:text-red-400' : 'text-gray-400 hover:text-red-500'}`}
           >
             <LogOut size={14} />
           </button>
@@ -124,11 +143,11 @@ export default function PendixRoot() {
   );
 
   return (
-    <div className="min-h-screen bg-[#06000f] text-gray-200 flex font-sans">
+    <div className={`min-h-screen flex font-sans ${c.page}`}>
       <Toaster richColors position="top-right" />
 
       {/* Sidebar — desktop fixa */}
-      <aside className="hidden lg:flex w-60 border-r border-white/[0.06] h-screen fixed left-0 top-0 flex-col bg-[#08000f] z-40">
+      <aside className={`hidden lg:flex w-60 border-r h-screen fixed left-0 top-0 flex-col z-40 ${c.sidebar}`}>
         {SidebarContent}
       </aside>
 
@@ -136,7 +155,7 @@ export default function PendixRoot() {
       {mobileOpen && (
         <div className="lg:hidden fixed inset-0 z-50 flex">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
-          <aside className="relative w-64 h-full flex flex-col bg-[#08000f] border-r border-white/[0.06] animate-in slide-in-from-left">
+          <aside className={`relative w-64 h-full flex flex-col border-r animate-in slide-in-from-left ${c.sidebar}`}>
             {SidebarContent}
           </aside>
         </div>

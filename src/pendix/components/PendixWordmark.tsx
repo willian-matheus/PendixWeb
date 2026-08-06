@@ -24,7 +24,7 @@ export default function PendixWordmark({ size = 40, color = '#ffffff', className
       Pendi
       <span
         style={{
-          background: 'linear-gradient(135deg, #000000, #9333ea)',
+          backgroundImage: 'linear-gradient(135deg, #000000, #9333ea)',
           WebkitBackgroundClip: 'text',
           backgroundClip: 'text',
           color: 'transparent',

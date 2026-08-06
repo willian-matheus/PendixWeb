@@ -11,6 +11,7 @@ const PendixClientes = lazy(() => import("../pendix/pages/PendixClientes"));
 const PendixEmpresas = lazy(() => import("../pendix/pages/PendixEmpresas"));
 const PendixPendencias = lazy(() => import("../pendix/pages/PendixPendencias"));
 const PendixPendenciaDetalhe = lazy(() => import("../pendix/pages/PendixPendenciaDetalhe"));
+const PendixCalendario = lazy(() => import("../pendix/pages/PendixCalendario"));
 const PendixHistorico = lazy(() => import("../pendix/pages/PendixHistorico"));
 const PendixNotificacoes = lazy(() => import("../pendix/pages/PendixNotificacoes"));
 const PendixConfiguracoes = lazy(() => import("../pendix/pages/PendixConfiguracoes"));
@@ -111,6 +112,7 @@ export const router = createBrowserRouter([
       { path: "empresas", element: <PendixEmpresas /> },
       { path: "pendencias", element: <PendixPendencias /> },
       { path: "pendencias/:id", element: <PendixPendenciaDetalhe /> },
+      { path: "calendario", element: <PendixCalendario /> },
       { path: "historico", element: <PendixHistorico /> },
       { path: "notificacoes", element: <PendixNotificacoes /> },
       { path: "configuracoes", element: <PendixConfiguracoes /> },
