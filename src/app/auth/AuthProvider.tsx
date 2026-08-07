@@ -114,7 +114,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       let plano: PlanType = 'normal';
       if (escritorio_id) {
         const { data: escData } = await supabase
-          .from('escritorios')
+          .from('empresas')
           .select('plano')
           .eq('id', escritorio_id)
           .maybeSingle();
