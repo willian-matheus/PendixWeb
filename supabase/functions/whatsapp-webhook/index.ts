@@ -8,6 +8,9 @@
 //
 // === FLUXO DE MENSAGEM RECEBIDA ===
 //
+// 0. Nota de voz → transcrita (Transkriptor) e tratada como texto digitado
+//    a partir daqui — todo o resto do fluxo (matcher, wizard, chat livre)
+//    já lê `conteudo.texto` normalmente, então funciona sem lógica extra.
 // 1. Identifica o cliente pelo telefone (pendix_clientes)
 // 1a. SE NÃO achou cliente pelo telefone → fluxo de LOGIN POR E-MAIL:
 //     pede o e-mail cadastrado, busca em pendix_clientes.email e, se achar,
@@ -464,6 +467,66 @@ async function validarDocumentoComClaude(
   }
 }
 
+// ── Transcrição de áudio (Transkriptor) ─────────────────────────────────────
+//
+// WhatsApp manda nota de voz como áudio — sem transcrever, o resto do fluxo
+// (matcher de pendência, wizard, chat livre) não entende nada, porque todos
+// eles trabalham em cima de `conteudo.texto`. Usa a Transkriptor pra
+// transcrever a partir de uma URL: manda uma signed URL temporária do
+// arquivo que a gente mesmo já subiu pro storage privado, espera processar
+// (poll com tentativas limitadas — não segura a resposta do webhook
+// indefinidamente pra áudios longos) e retorna o texto puro. `null` = não
+// deu pra transcrever (sem API key configurada, erro, ou não terminou a
+// tempo) — nesse caso o fluxo cai pro comportamento padrão de mensagem sem
+// texto reconhecido.
+const TRANSCRICAO_POLL_TENTATIVAS = 10;
+const TRANSCRICAO_POLL_INTERVALO_MS = 3000;
+
+async function transcreverAudio(urlPublica: string): Promise<string | null> {
+  const apiKey = Deno.env.get('TRANSKRIPTOR_API_KEY');
+  if (!apiKey) return null;
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${apiKey}`,
+    'Accept': 'application/json',
+  };
+
+  try {
+    const respEnvio = await fetch('https://api.tor.app/developer/transcription/url', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ url: urlPublica, service: 'Standard', language: 'pt-BR' }),
+    });
+    if (!respEnvio.ok) return null;
+    const dataEnvio = await respEnvio.json();
+    const orderId = dataEnvio?.body?.order_id ?? dataEnvio?.order_id;
+    if (!orderId) return null;
+
+    for (let tentativa = 0; tentativa < TRANSCRICAO_POLL_TENTATIVAS; tentativa++) {
+      await new Promise((resolve) => setTimeout(resolve, TRANSCRICAO_POLL_INTERVALO_MS));
+
+      const respExport = await fetch(`https://api.tor.app/developer/files/${orderId}/content/export`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ export_type: 'txt' }),
+      });
+
+      if (respExport.status === 202) continue; // ainda processando
+      if (!respExport.ok) return null;
+
+      const dataExport = await respExport.json();
+      const texto = dataExport?.body?.content ?? dataExport?.content;
+      return typeof texto === 'string' && texto.trim() ? texto.trim() : null;
+    }
+
+    return null; // não terminou dentro do orçamento de tentativas
+  } catch (err) {
+    console.error('whatsapp-webhook: falha ao transcrever áudio', String(err));
+    return null;
+  }
+}
+
 // ── Conversa vinculada a pendência (fluxo original) ────────────────────────
 
 async function acharOuCriarConversa(
@@ -878,6 +941,7 @@ async function processarPassoColeta(
   botaoId: string | null,
   anexoPath: string | null,
   midiaFileName: string | null,
+  midiaKind: MidiaKind | null,
   nomeCliente: string,
 ): Promise<{ ok: boolean; pendencia_id?: string }> {
   const passo = estado.passo;
@@ -969,7 +1033,7 @@ async function processarPassoColeta(
       break;
     }
     case 'anexo':
-      if (!anexoPath) {
+      if (!anexoPath || midiaKind === 'audio') {
         await reenviarPassoObrigatorio(supabase, sessionId, telefone, passo, dados, nomeCliente);
         return { ok: true };
       }
@@ -1044,7 +1108,7 @@ async function handleWhatsAppConversa(
   if (estado) {
     return await processarPassoColeta(
       supabase, sessionId, cliente, telefone, estado,
-      conteudo.texto, botaoId, anexoPath, conteudo.midia?.fileName ?? null, nomeCliente,
+      conteudo.texto, botaoId, anexoPath, conteudo.midia?.fileName ?? null, conteudo.midia?.kind ?? null, nomeCliente,
     );
   }
 
@@ -1154,6 +1218,19 @@ Deno.serve(async (req) => {
       anexoBase64 = guardado?.base64 ?? null;
     }
 
+    // Nota de voz: transcreve e trata como se o cliente tivesse digitado —
+    // deixa o resto do fluxo (matcher, wizard, chat livre) funcionar sem
+    // nenhuma lógica nova, já que todos eles já leem `conteudo.texto`.
+    if (conteudo.midia?.kind === 'audio' && anexoPath) {
+      const { data: signedData } = await supabase.storage
+        .from('pendix-anexos')
+        .createSignedUrl(anexoPath, 900);
+      if (signedData?.signedUrl) {
+        const transcricao = await transcreverAudio(signedData.signedUrl);
+        if (transcricao) conteudo.texto = transcricao;
+      }
+    }
+
     // Se já existe um wizard de criação em andamento pra esse cliente, TODA
     // mensagem pertence a ele — nunca tenta casar com uma pendência aberta
     // nesse meio-tempo. Sem essa checagem, um clique de botão do wizard (ex:
@@ -1229,7 +1306,10 @@ Deno.serve(async (req) => {
       const pendenciaMatch = candidatas?.find((c: any) => c.id === pendenciaId);
       const nomeDocumento = pendenciaMatch?.nome_documento ?? 'documento';
 
-      if (anexoPath) {
+      // Áudio não conta como "arquivo enviado pra cumprir a pendência" — é
+      // uma mensagem falada (já transcrita em conteudo.texto acima), então
+      // cai no mesmo branch de resposta em texto, não no de documento.
+      if (anexoPath && conteudo.midia?.kind !== 'audio') {
         // Analisa o conteúdo de verdade do arquivo (não só o nome) antes de
         // decidir o que fazer — só finaliza sozinho quando o Claude confirma
         // com confiança que é o documento certo; qualquer outra coisa (não
