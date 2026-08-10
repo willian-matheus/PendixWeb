@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import {
   getPendixClientes, postPendixCliente, updatePendixCliente, deletePendixCliente,
   getPendixDocConfigs, postPendixDocConfig, deletePendixDocConfig,
-  type PendixCliente, type PendixDocConfig, type PendixRegime, type PendixClienteStatus, type PendixPrioridade, type PendixFrequencia,
+  type PendixCliente, type PendixDocConfig, type PendixRegime, type PendixClienteStatus, type PendixClienteTipo, type PendixPrioridade, type PendixFrequencia,
 } from '../services/pendix';
 import {
   getPendixEmpresas, getEmpresaIdDoCliente, setEmpresaDoCliente, getClienteEmpresaLinks, type PendixEmpresa,
@@ -26,6 +26,10 @@ const STATUS_OPTIONS: { value: PendixClienteStatus; label: string }[] = [
   { value: 'ativo', label: 'Ativo' },
   { value: 'inativo', label: 'Inativo' },
   { value: 'suspenso', label: 'Suspenso' },
+];
+const TIPO_OPTIONS: { value: PendixClienteTipo; label: string }[] = [
+  { value: 'pessoa', label: 'Cliente' },
+  { value: 'empresa', label: 'Empresa' },
 ];
 const PRIORIDADES: { value: PendixPrioridade; label: string }[] = [
   { value: 'baixa', label: 'Baixa' },
@@ -48,7 +52,7 @@ const STATUS_BADGE: Record<PendixClienteStatus, string> = {
 
 const EMPTY_CLIENTE: Omit<PendixCliente, 'id' | 'created_at' | 'updated_at'> = {
   escritorio_id: '', nome: '', responsavel: '', telefone: '', email: '',
-  regime: 'simples_nacional', status: 'ativo', observacoes: '',
+  regime: 'simples_nacional', status: 'ativo', observacoes: '', tipo: 'pessoa',
 };
 const EMPTY_DOC: Omit<PendixDocConfig, 'id' | 'created_at' | 'escritorio_id'> = {
   cliente_id: '', nome: '', frequencia: 'mensal', dia_limite: 10, prioridade: 'media', ativo: true,
@@ -370,6 +374,16 @@ export default function PendixClientes() {
                   />
                 </div>
               ))}
+              <div>
+                <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Tipo</label>
+                <select
+                  value={form.tipo ?? 'pessoa'}
+                  onChange={e => setForm(prev => ({ ...prev, tipo: e.target.value as PendixClienteTipo }))}
+                  className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.select}`}
+                >
+                  {TIPO_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+              </div>
               <div>
                 <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Empresa vinculada (opcional)</label>
                 <select

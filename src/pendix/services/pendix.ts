@@ -29,8 +29,6 @@ export type PendixNivelCobranca = 'amigavel' | 'lembrete' | 'urgente' | 'critico
 export type PendixFrequencia = 'mensal' | 'trimestral' | 'anual' | 'unico';
 export type PendixPrioridade = 'baixa' | 'media' | 'alta' | 'urgente';
 export type PendixPendenciaTipo = 'cliente' | 'empresa';
-// Frequência de cobrança da pendência (campo novo, só local — ver bloco "Extras" abaixo)
-export type PendixFrequenciaCobranca = 'unica' | 'diaria' | 'a_cada_2_dias' | 'semanal' | 'quinzenal' | 'mensal';
 
 export interface PendixCliente {
   id: string;
@@ -81,6 +79,13 @@ export interface PendixPendencia {
   ultima_mensagem_enviada_em?: string;
   requer_revisao_humana?: boolean;
   origem?: 'manual' | 'whatsapp' | 'automatico';
+  tipo?: PendixPendenciaTipo;
+  descricao?: string;
+  prioridade?: PendixPrioridade;
+  data_inicio_cobranca?: string;
+  arquivo_modelo_url?: string;
+  arquivo_modelo_nome?: string;
+  datas_notificacao?: string[];
   created_at: string;
   updated_at: string;
   pendix_clientes?: { nome: string; telefone?: string };
@@ -223,7 +228,11 @@ export async function updatePendixPendenciaStatus(
 
 export async function updatePendixPendenciaCampos(
   id: string,
-  p: Partial<Pick<PendixPendencia, 'nome_documento' | 'competencia' | 'data_limite' | 'observacoes'>>
+  p: Partial<Pick<PendixPendencia,
+    'nome_documento' | 'competencia' | 'data_limite' | 'observacoes' |
+    'tipo' | 'descricao' | 'prioridade' | 'data_inicio_cobranca' |
+    'arquivo_modelo_url' | 'arquivo_modelo_nome' | 'datas_notificacao'
+  >>
 ) {
   const { data, error } = await supabase
     .from('pendix_pendencias')
@@ -313,22 +322,16 @@ export async function addPendixHistorico(
 }
 
 // ── Extras locais da pendência ───────────────────────────────────────────
-// `pendix_pendencias` no Supabase só tem as colunas originais (nome_documento,
-// cliente_id, competencia, status, data_limite, observacoes, arquivo_*).
-// Os campos novos do spec (tipo, empresa, prioridade, descrição, datas de
-// cobrança, anexo de exemplo) não têm coluna ainda, então ficam guardados
-// localmente por id da pendência — trocar por Supabase quando a coluna existir.
+// tipo, descricao, prioridade, data_inicio_cobranca, arquivo_modelo_* e
+// datas_notificacao agora são colunas reais em pendix_pendencias (ver
+// migrations 0011 e 0013). O que resta aqui é só o vínculo com "empresa"
+// (agrupador que ainda vive só no navegador, sem tabela no Supabase — ver
+// services/empresas.ts).
 
 const KEY_EXTRAS = 'pendix_mock_pendencia_extras_v1';
 
 export interface PendixPendenciaExtra {
-  tipo?: PendixPendenciaTipo;
   empresa_id?: string;
-  descricao?: string;
-  prioridade?: PendixPrioridade;
-  data_inicio_cobranca?: string;
-  frequencia_cobranca?: PendixFrequenciaCobranca;
-  anexo_nome?: string;
 }
 
 function loadExtras(): Record<string, PendixPendenciaExtra> {

@@ -11,7 +11,7 @@ import {
   getPendixClientes, postPendixPendencia, addPendixHistorico,
   getPendenciaExtra, savePendenciaExtra,
   type PendixPendencia, type PendixPendenciaStatus, type PendixCliente,
-  type PendixPendenciaTipo, type PendixPrioridade, type PendixFrequenciaCobranca,
+  type PendixPendenciaTipo, type PendixPrioridade,
 } from '../services/pendix';
 import { getPendixEmpresas, getClienteEmpresaLinks, getClientesIdsDaEmpresa, type PendixEmpresa } from '../services/empresas';
 import {
@@ -34,14 +34,7 @@ const PRIORIDADE_OPTIONS: { value: PendixPrioridade; label: string; color: strin
   { value: 'urgente', label: 'Urgente', color: 'bg-red-500/15 text-red-400 border-red-500/20' },
 ];
 
-const FREQ_COBRANCA_OPTIONS: { value: PendixFrequenciaCobranca; label: string }[] = [
-  { value: 'unica', label: 'Uma vez' },
-  { value: 'diaria', label: 'Diária' },
-  { value: 'a_cada_2_dias', label: 'A cada 2 dias' },
-  { value: 'semanal', label: 'Semanal' },
-  { value: 'quinzenal', label: 'Quinzenal' },
-  { value: 'mensal', label: 'Mensal' },
-];
+const MAX_NOTIFICACOES_EXTRA = 3;
 
 function mesAtual() {
   const d = new Date();
@@ -69,7 +62,8 @@ const EMPTY_FORM = {
   competencia: mesAtual(),
   dataVencimento: '',
   dataInicioCobranca: '',
-  frequenciaCobranca: 'unica' as PendixFrequenciaCobranca,
+  notificarMultiplasVezes: false,
+  datasNotificacao: ['', '', ''] as string[],
   anexoNome: '',
   observacaoInterna: '',
 };
@@ -140,11 +134,10 @@ export default function PendixPendencias() {
   useEffect(() => { load(); }, [load]);
 
   const visiveis = pendencias.filter(p => {
-    const extra = getPendenciaExtra(p.id);
-    if (filterPrioridade && extra.prioridade !== filterPrioridade) return false;
+    if (filterPrioridade && p.prioridade !== filterPrioridade) return false;
     if (filterData && p.data_limite !== filterData) return false;
     if (filterEmpresa) {
-      const empresaDaPendencia = extra.empresa_id ?? links[p.cliente_id];
+      const empresaDaPendencia = getPendenciaExtra(p.id).empresa_id ?? links[p.cliente_id];
       if (empresaDaPendencia !== filterEmpresa) return false;
     }
     return true;
@@ -201,18 +194,19 @@ export default function PendixPendencias() {
     const extra = getPendenciaExtra(p.id);
     setEditandoId(p.id);
     setForm({
-      tipo: extra.tipo ?? 'cliente',
+      tipo: p.tipo ?? 'cliente',
       clienteId: p.cliente_id,
       empresaId: extra.empresa_id ?? '',
       escopoEmpresa: 'especifico',
       titulo: p.nome_documento,
-      descricao: extra.descricao ?? '',
-      prioridade: extra.prioridade ?? 'media',
+      descricao: p.descricao ?? '',
+      prioridade: p.prioridade ?? 'media',
       competencia: p.competencia,
       dataVencimento: p.data_limite ?? '',
-      dataInicioCobranca: extra.data_inicio_cobranca ?? '',
-      frequenciaCobranca: extra.frequencia_cobranca ?? 'unica',
-      anexoNome: extra.anexo_nome ?? '',
+      dataInicioCobranca: p.data_inicio_cobranca ?? '',
+      notificarMultiplasVezes: (p.datas_notificacao?.length ?? 0) > 0,
+      datasNotificacao: Array.from({ length: MAX_NOTIFICACOES_EXTRA }, (_, i) => p.datas_notificacao?.[i] ?? ''),
+      anexoNome: p.arquivo_modelo_nome ?? '',
       observacaoInterna: p.observacoes ?? '',
     });
     setModalOpen(true);
@@ -230,14 +224,16 @@ export default function PendixPendencias() {
 
     setSalvando(true);
     try {
-      const extra = {
+      const camposReais = {
         tipo: form.tipo,
-        empresa_id: form.tipo === 'empresa' ? form.empresaId : undefined,
         descricao: form.descricao || undefined,
         prioridade: form.prioridade,
         data_inicio_cobranca: form.dataInicioCobranca || undefined,
-        frequencia_cobranca: form.frequenciaCobranca,
-        anexo_nome: form.anexoNome || undefined,
+        arquivo_modelo_nome: form.anexoNome || undefined,
+        datas_notificacao: form.notificarMultiplasVezes ? form.datasNotificacao.filter(Boolean) : [],
+      };
+      const extraLocal = {
+        empresa_id: form.tipo === 'empresa' ? form.empresaId : undefined,
       };
 
       if (editandoId) {
@@ -246,8 +242,9 @@ export default function PendixPendencias() {
           competencia: form.competencia,
           data_limite: form.dataVencimento || undefined,
           observacoes: form.observacaoInterna || undefined,
+          ...camposReais,
         });
-        savePendenciaExtra(editandoId, extra);
+        savePendenciaExtra(editandoId, extraLocal);
         setPendencias(prev => prev.map(p => p.id === editandoId ? updated : p));
         toast.success('Pendência atualizada');
       } else if (form.tipo === 'empresa' && form.escopoEmpresa === 'todos') {
@@ -259,20 +256,21 @@ export default function PendixPendencias() {
             escritorio_id: '', cliente_id: clienteId, nome_documento: form.titulo,
             competencia: form.competencia, status: 'pendente',
             data_limite: form.dataVencimento || undefined, observacoes: form.observacaoInterna || undefined,
+            ...camposReais,
           } as any);
-          savePendenciaExtra(nova.id, extra);
+          savePendenciaExtra(nova.id, extraLocal);
           criadas.push(nova);
         }
         setPendencias(prev => [...criadas, ...prev]);
         toast.success(`${criadas.length} pendências criadas para os clientes da empresa`);
       } else {
-        const clienteId = form.tipo === 'empresa' ? form.clienteId : form.clienteId;
         const nova = await postPendixPendencia({
-          escritorio_id: '', cliente_id: clienteId, nome_documento: form.titulo,
+          escritorio_id: '', cliente_id: form.clienteId, nome_documento: form.titulo,
           competencia: form.competencia, status: 'pendente',
           data_limite: form.dataVencimento || undefined, observacoes: form.observacaoInterna || undefined,
+          ...camposReais,
         } as any);
-        savePendenciaExtra(nova.id, extra);
+        savePendenciaExtra(nova.id, extraLocal);
         setPendencias(prev => [nova, ...prev]);
         toast.success('Pendência criada');
       }
@@ -388,8 +386,7 @@ export default function PendixPendencias() {
           visiveis.map((p, i) => {
             const cfg = STATUS_CONFIG[p.status];
             const Icon = cfg.icon;
-            const extra = getPendenciaExtra(p.id);
-            const prio = extra.prioridade ? PRIORIDADE_OPTIONS.find(x => x.value === extra.prioridade) : null;
+            const prio = p.prioridade ? PRIORIDADE_OPTIONS.find(x => x.value === p.prioridade) : null;
             return (
               <div
                 key={p.id}
@@ -584,13 +581,33 @@ export default function PendixPendencias() {
               </div>
 
               <div>
-                <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Frequência de cobrança</label>
-                <select
-                  value={form.frequenciaCobranca} onChange={e => setForm(p => ({ ...p, frequenciaCobranca: e.target.value as PendixFrequenciaCobranca }))}
-                  className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.select}`}
-                >
-                  {FREQ_COBRANCA_OPTIONS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
-                </select>
+                <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={form.notificarMultiplasVezes}
+                    onChange={e => setForm(p => ({ ...p, notificarMultiplasVezes: e.target.checked, datasNotificacao: e.target.checked ? p.datasNotificacao : ['', '', ''] }))}
+                    className="w-4 h-4 rounded accent-purple-600 cursor-pointer"
+                  />
+                  <span className={`text-xs font-bold uppercase tracking-widest ${c.label}`}>Notificar mais de uma vez (até {MAX_NOTIFICACOES_EXTRA}x)</span>
+                </label>
+                {form.notificarMultiplasVezes && (
+                  <div className="grid grid-cols-3 gap-3 mt-3">
+                    {form.datasNotificacao.map((data, i) => (
+                      <div key={i}>
+                        <label className={`block text-[10px] font-bold uppercase tracking-widest mb-1 ${c.label}`}>{i + 1}ª notificação</label>
+                        <input
+                          type="date" value={data}
+                          onChange={e => setForm(p => {
+                            const datasNotificacao = [...p.datasNotificacao];
+                            datasNotificacao[i] = e.target.value;
+                            return { ...p, datasNotificacao };
+                          })}
+                          className={`w-full rounded-xl border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.input}`}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div>

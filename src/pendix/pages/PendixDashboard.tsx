@@ -12,7 +12,7 @@ import { useTheme } from '../../app/theme/ThemeProvider';
 import { toast } from 'sonner';
 import {
   getPendixStats, getPendixPendencias, getPendixClientes, getPendixHistorico,
-  gerarPendenciasMes, getPendenciaExtra,
+  gerarPendenciasMes,
   type PendixPendencia, type PendixCliente, type PendixHistoricoEntry,
 } from '../services/pendix';
 
@@ -125,7 +125,7 @@ export default function PendixDashboard() {
   const porPrioridadeData = useMemo(() => {
     const counts: Record<string, number> = { baixa: 0, media: 0, alta: 0, urgente: 0 };
     for (const p of pendencias) {
-      const prio = getPendenciaExtra(p.id).prioridade ?? 'media';
+      const prio = p.prioridade ?? 'media';
       counts[prio] = (counts[prio] ?? 0) + 1;
     }
     return Object.entries(counts).map(([k, value]) => ({ name: PRIORIDADE_LABEL[k], value, color: PRIORIDADE_HEX[k] }));

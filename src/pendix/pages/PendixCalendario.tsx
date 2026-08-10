@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight, Users, CalendarDays } from 'lucide-react';
 import { useTheme } from '../../app/theme/ThemeProvider';
 import { toast } from 'sonner';
 import {
-  getPendixPendencias, getPendenciaExtra,
+  getPendixPendencias,
   type PendixPendencia, type PendixPrioridade,
 } from '../services/pendix';
 
@@ -83,7 +83,7 @@ export default function PendixCalendario() {
   const todayKey = toKey(new Date());
 
   function prioOf(p: PendixPendencia): PendixPrioridade {
-    return getPendenciaExtra(p.id).prioridade ?? 'media';
+    return p.prioridade ?? 'media';
   }
 
   function goToday() { setCursor(new Date()); setSelectedDay(null); }

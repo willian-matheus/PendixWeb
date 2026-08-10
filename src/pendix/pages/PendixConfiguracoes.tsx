@@ -1,11 +1,14 @@
 import { useState } from 'react';
-import { User, Lock, Palette, CreditCard, Sun, Moon, LogOut, Check } from 'lucide-react';
+import { User, Lock, Palette, CreditCard, Sun, Moon, LogOut, Check, MessageCircle } from 'lucide-react';
 import { useTheme } from '../../app/theme/ThemeProvider';
 import { useAccentColor, ACCENT_COLORS, type AccentColorId } from '../../app/theme/AccentColorProvider';
 import { useAuth } from '../../app/auth/AuthProvider';
 import { toast } from 'sonner';
 
 const CORES = (Object.keys(ACCENT_COLORS) as AccentColorId[]).map(id => ({ id, ...ACCENT_COLORS[id] }));
+
+// Número do bot do Pendix no WhatsApp (com DDD, sem formatação)
+const WHATSAPP_PENDIX_NUMERO = '47991964449';
 
 export default function PendixConfiguracoes() {
   const { theme, toggleTheme } = useTheme();
@@ -58,6 +61,10 @@ export default function PendixConfiguracoes() {
   function handleSelecionarCor(id: AccentColorId) {
     setAccent(id);
     toast.success('Cor principal atualizada');
+  }
+
+  function abrirWhatsappPendix() {
+    window.open(`https://wa.me/55${WHATSAPP_PENDIX_NUMERO}`, '_blank');
   }
 
   const corSelecionada = ACCENT_COLORS[accent];
@@ -207,6 +214,24 @@ export default function PendixConfiguracoes() {
               </button>
             </div>
           </div>
+        </div>
+
+        {/* WhatsApp Pendix */}
+        <div className={`rounded-2xl border p-6 ${c.card}`}>
+          <div className="flex items-center gap-2 mb-5">
+            <MessageCircle size={15} className="text-purple-400" />
+            <h2 className="text-sm font-black">WhatsApp Pendix</h2>
+          </div>
+          <div className={`rounded-xl border p-4 mb-4 ${isDark ? 'bg-white/3 border-white/5' : 'bg-gray-50 border-gray-100'}`}>
+            <p className={`text-xs font-bold uppercase tracking-widest mb-1 ${c.label}`}>Número do bot</p>
+            <p className="text-sm">{WHATSAPP_PENDIX_NUMERO}</p>
+          </div>
+          <button
+            onClick={abrirWhatsappPendix}
+            className="w-full flex items-center justify-center gap-2 bg-emerald-600/15 text-emerald-400 hover:bg-emerald-600/25 border border-emerald-500/20 text-sm font-bold py-2.5 rounded-xl transition-colors"
+          >
+            <MessageCircle size={14} /> Abrir WhatsApp do Pendix
+          </button>
         </div>
       </div>
     </div>

@@ -22,10 +22,6 @@ const STATUS_CONFIG: Record<PendixPendenciaStatus, { label: string; color: strin
 };
 
 const PRIORIDADE_LABEL: Record<string, string> = { baixa: 'Baixa', media: 'Média', alta: 'Alta', urgente: 'Urgente' };
-const FREQ_LABEL: Record<string, string> = {
-  unica: 'Uma vez', diaria: 'Diária', a_cada_2_dias: 'A cada 2 dias',
-  semanal: 'Semanal', quinzenal: 'Quinzenal', mensal: 'Mensal',
-};
 
 const TIMELINE_STEPS: { key: PendixPendenciaStatus | 'criada'; label: string; icon: React.ComponentType<any> }[] = [
   { key: 'criada',     label: 'Pendência criada',        icon: PlusCircle },
@@ -156,9 +152,9 @@ export default function PendixPendenciaDetalhe() {
                 <MessageCircle size={11} /> Via WhatsApp
               </span>
             )}
-            {extra.prioridade && (
+            {pendencia.prioridade && (
               <span className="text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full border bg-purple-500/15 text-purple-400 border-purple-500/20">
-                Prioridade {PRIORIDADE_LABEL[extra.prioridade]}
+                Prioridade {PRIORIDADE_LABEL[pendencia.prioridade]}
               </span>
             )}
           </div>
@@ -188,14 +184,14 @@ export default function PendixPendenciaDetalhe() {
             <p className={`text-xs font-bold uppercase tracking-widest mb-4 ${c.label}`}>Dados gerais</p>
             <div className="grid sm:grid-cols-2 gap-4">
               <div><p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${c.label}`}>Vencimento</p><p className="text-sm">{pendencia.data_limite || '—'}</p></div>
-              <div><p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${c.label}`}>Data inicial da cobrança</p><p className="text-sm">{extra.data_inicio_cobranca || '—'}</p></div>
-              <div><p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${c.label}`}>Frequência de cobrança</p><p className="text-sm">{extra.frequencia_cobranca ? FREQ_LABEL[extra.frequencia_cobranca] : '—'}</p></div>
-              <div><p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${c.label}`}>Tipo</p><p className="text-sm capitalize">{extra.tipo === 'empresa' ? 'Empresa' : 'Cliente'}</p></div>
+              <div><p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${c.label}`}>Data inicial da cobrança</p><p className="text-sm">{pendencia.data_inicio_cobranca || '—'}</p></div>
+              <div><p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${c.label}`}>Notificações extras</p><p className="text-sm">{pendencia.datas_notificacao?.length ? pendencia.datas_notificacao.join(', ') : '—'}</p></div>
+              <div><p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${c.label}`}>Tipo</p><p className="text-sm capitalize">{pendencia.tipo === 'empresa' ? 'Empresa' : 'Cliente'}</p></div>
             </div>
-            {extra.descricao && (
+            {pendencia.descricao && (
               <div className="mt-4">
                 <p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${c.label}`}>Descrição</p>
-                <p className="text-sm leading-relaxed">{extra.descricao}</p>
+                <p className="text-sm leading-relaxed">{pendencia.descricao}</p>
               </div>
             )}
           </div>
@@ -269,10 +265,10 @@ export default function PendixPendenciaDetalhe() {
               <Paperclip size={14} className="text-purple-400" />
               <p className={`text-xs font-bold uppercase tracking-widest ${c.label}`}>Anexos</p>
             </div>
-            {extra.anexo_nome ? (
+            {pendencia.arquivo_modelo_nome ? (
               <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs ${isDark ? 'bg-white/3 border-white/5' : 'bg-gray-50 border-gray-100'}`}>
                 <FileText size={13} className="text-purple-400 shrink-0" />
-                <span className="truncate">{extra.anexo_nome}</span>
+                <span className="truncate">{pendencia.arquivo_modelo_nome}</span>
               </div>
             ) : (
               <p className={`text-xs ${c.muted}`}>Nenhum anexo de exemplo enviado.</p>
