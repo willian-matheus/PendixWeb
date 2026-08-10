@@ -15,7 +15,10 @@
 //     progresso entre mensagens). Não continua para os passos abaixo nessa
 //     mesma mensagem — a próxima mensagem do cliente já bate o telefone.
 // 2. Busca pendências em aberto do cliente
-// 3. SE encontrou match → vincula à pendência existente (fluxo original)
+// 3. SE encontrou match → vincula à pendência existente (fluxo original).
+//    Se veio anexo, o Claude analisa o conteúdo do arquivo (não só o nome)
+//    antes de decidir: só marca 'recebido' sozinho com confirmação da IA;
+//    qualquer outra coisa cai pra 'em_analise' aguardando revisão humana.
 // 4. SE NÃO encontrou match → WIZARD DE CRIAÇÃO DE PENDÊNCIA:
 //    a. Busca ou cria uma sessão de chat (pendix_chat_sessions)
 //    b. Se a sessão já tem `coleta_estado` (passo + dados coletados até
@@ -54,9 +57,18 @@ const SESSAO_TIMEOUT_MS = 30 * 60 * 1000;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+// Normaliza pro formato canônico DDD + 9 dígitos (11 dígitos, sem código do
+// país), tratando o "9" extra do celular brasileiro — a Z-API às vezes
+// entrega o número recebido SEM esse 9 (formato antigo, 10 dígitos locais)
+// mesmo quando o número está cadastrado COM ele, o que fazia a comparação
+// simples de dígitos falhar e o cliente cair, incorretamente, no fluxo de
+// "número não cadastrado" mesmo já sendo cliente.
 function localPhoneDigits(phone: string): string {
-  const digits = phone.replace(/\D/g, '');
-  return digits.length > 11 ? digits.slice(-11) : digits;
+  let digits = phone.replace(/\D/g, '');
+  if (digits.length > 11 && digits.startsWith('55')) digits = digits.slice(2);
+  if (digits.length > 11) digits = digits.slice(-11);
+  if (digits.length === 10) digits = `${digits.slice(0, 2)}9${digits.slice(2)}`;
+  return digits;
 }
 
 function normalizePhone(phone: string): string {
@@ -123,12 +135,24 @@ function extrairBotaoId(payload: any): string | null {
 
 // ── Media download ─────────────────────────────────────────────────────────
 
+// Converte em base64 por blocos (evita estourar a pilha do spread operator
+// em arquivos maiores) — usado pra mandar o anexo pra validação com o Claude
+// sem precisar baixar o arquivo de novo depois de já ter subido pro storage.
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
 async function baixarEGuardarMidia(
   supabase: ReturnType<typeof createClient>,
   midia: NonNullable<ConteudoRecebido['midia']>,
   escritorioId: string,
   clienteId: string
-): Promise<string | null> {
+): Promise<{ path: string; base64: string } | null> {
   try {
     const resp = await fetch(midia.url);
     if (!resp.ok) return null;
@@ -141,7 +165,7 @@ async function baixarEGuardarMidia(
       console.error('whatsapp-webhook: falha ao subir anexo', error.message);
       return null;
     }
-    return path;
+    return { path, base64: bytesToBase64(bytes) };
   } catch (err) {
     console.error('whatsapp-webhook: falha ao baixar mídia', String(err));
     return null;
@@ -300,7 +324,7 @@ async function handleIdentificacaoFlow(
 
     await registrarTentativaEResponder(
       supabase, telefoneDigits, telefoneRaw,
-      'Não encontramos esse e-mail no nosso cadastro. Confira se digitou certo e tente novamente, ou entre em contato com seu escritório de contabilidade.',
+      'Não encontramos esse e-mail no nosso cadastro 🙏 Pode conferir e tentar novamente? Se preferir, é só falar com seu escritório de contabilidade.',
     );
     return;
   }
@@ -360,6 +384,82 @@ async function escolherPendenciaComClaude(
     return escolhida && escolhida !== 'nenhuma' ? escolhida : null;
   } catch (err) {
     console.error('whatsapp-webhook: falha ao consultar Claude', String(err));
+    return null;
+  }
+}
+
+// ── Validação de documento recebido (Claude visão/PDF) ─────────────────────
+//
+// Olha o conteúdo de verdade do arquivo (não só o nome) pra decidir se
+// parece ser o documento pedido. `null` = não deu pra validar automaticamente
+// (tipo de arquivo sem suporte a análise, sem API key, ou erro na chamada) —
+// nesses casos a pendência cai pra revisão humana, igual ao comportamento
+// anterior. Nunca rejeita sozinho: se o Claude achar que não bate, ainda
+// assim fica para um humano confirmar (evita recusar por engano um
+// documento válido só porque a IA teve um falso negativo).
+async function validarDocumentoComClaude(
+  nomeDocumento: string,
+  competencia: string,
+  midia: { mimeType: string; kind: MidiaKind },
+  base64: string,
+): Promise<{ valido: boolean; motivo: string } | null> {
+  const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
+  if (!apiKey) return null;
+
+  let conteudoArquivo: Record<string, unknown> | null = null;
+  if (midia.kind === 'image') {
+    conteudoArquivo = { type: 'image', source: { type: 'base64', media_type: midia.mimeType, data: base64 } };
+  } else if (midia.kind === 'document' && midia.mimeType === 'application/pdf') {
+    conteudoArquivo = { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } };
+  }
+  if (!conteudoArquivo) return null;
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-5',
+        max_tokens: 300,
+        messages: [{
+          role: 'user',
+          content: [
+            conteudoArquivo,
+            {
+              type: 'text',
+              text: `Um cliente de escritório contábil enviou este arquivo como o documento "${nomeDocumento}" ` +
+                `referente à competência ${competencia}. Analise o conteúdo do arquivo e diga se ele realmente ` +
+                `parece ser esse documento — não está em branco, corrompido, ilegível, ou é claramente outro tipo ` +
+                `de documento/assunto sem relação.`,
+            },
+          ],
+        }],
+        tools: [{
+          name: 'validar_documento',
+          description: 'Registra se o arquivo enviado parece ser um documento válido do tipo esperado.',
+          input_schema: {
+            type: 'object',
+            properties: {
+              valido: { type: 'boolean' },
+              motivo: { type: 'string', description: 'Justificativa breve (1 frase), em português.' },
+            },
+            required: ['valido', 'motivo'],
+          },
+        }],
+        tool_choice: { type: 'tool', name: 'validar_documento' },
+      }),
+    });
+
+    const data = await resp.json();
+    const toolUse = data.content?.find((b: any) => b.type === 'tool_use');
+    if (!toolUse) return null;
+    return { valido: !!toolUse.input?.valido, motivo: String(toolUse.input?.motivo ?? '') };
+  } catch (err) {
+    console.error('whatsapp-webhook: falha ao validar documento com Claude', String(err));
     return null;
   }
 }
@@ -451,7 +551,18 @@ function buildChatLivrePrompt(nomeCliente: string): string {
 Responda de forma breve, profissional e amigável (1 a 3 frases).
 Se o cliente perguntar sobre enviar um documento ou tiver uma pendência, avise que ele pode dizer algo como "quero criar uma pendência" ou "preciso enviar um documento" para você iniciar o cadastro guiado.
 Não invente informações sobre pendências específicas do cliente — você não tem acesso a esses dados aqui.
-Se o cliente perguntar algo fora do escopo contábil, redirecione gentilmente.`;
+Se o cliente perguntar algo fora do escopo contábil, redirecione gentilmente.
+
+Regras de atendimento (gentileza e cordialidade):
+- Tom sempre gentil, prestativo e profissional; nunca grosseiro, ríspido, impaciente, irônico ou frio/automático.
+- Quando o cliente relatar um problema, demonstre compreensão antes de responder (ex: "Entendi, vamos verificar isso para você.").
+- Nunca culpe o cliente por um erro ou problema.
+- Se não souber ou não puder resolver algo, não invente informação — diga com educação que a situação precisa ser verificada.
+- Evite linguagem técnica demais.
+- Mensagens curtas, claras e objetivas — sem textos longos desnecessários.
+- Emojis com moderação, só quando deixam a mensagem mais amigável — nunca em excesso ou em algo que pede tom mais formal.
+- Ao encerrar o atendimento, quando fizer sentido, use uma despedida cordial (ex: "Tenha um ótimo dia! 😊", "Ficamos à disposição!").
+- Prioridade: resolver a solicitação do cliente → ser claro → ser gentil → evitar informação desnecessária.`;
 }
 
 async function responderChatLivre(
@@ -748,7 +859,7 @@ async function reenviarPassoObrigatorio(
   sessionId: string, telefone: string, passo: PassoId, dados: DadosColeta, nomeCliente: string,
 ): Promise<void> {
   const { texto, botoes } = mensagemDoPasso(passo, dados, nomeCliente);
-  const textoComAviso = `⚠️ Não entendi, e esse campo é obrigatório para controle de pendências.\n\n${texto}`;
+  const textoComAviso = `Desculpa, não consegui entender essa resposta 🙏 Esse campo é obrigatório para a gente controlar direitinho a pendência.\n\n${texto}`;
   if (botoes.length) await enviarComBotoes(telefone, textoComAviso, botoes);
   else await enviarRespostaWhatsApp(telefone, textoComAviso);
 
@@ -785,7 +896,7 @@ async function processarPassoColeta(
         .eq('id', sessionId);
       const msg = pendenciaId
         ? '✅ Pendência criada com sucesso! Obrigado.'
-        : 'Ops, tive um problema ao salvar a pendência. Pode tentar de novo em instantes?';
+        : 'Ops, tive um problema para salvar a pendência 🙏 Pode tentar de novo em instantes?';
       await enviarRespostaWhatsApp(telefone, msg);
       await supabase.from('pendix_chat_mensagens').insert({ session_id: sessionId, remetente: 'ia', conteudo: msg });
       return { ok: !!pendenciaId, pendencia_id: pendenciaId ?? undefined };
@@ -1036,8 +1147,11 @@ Deno.serve(async (req) => {
     }
 
     let anexoPath: string | null = null;
+    let anexoBase64: string | null = null;
     if (conteudo.midia) {
-      anexoPath = await baixarEGuardarMidia(supabase, conteudo.midia, cliente.escritorio_id as string, cliente.id as string);
+      const guardado = await baixarEGuardarMidia(supabase, conteudo.midia, cliente.escritorio_id as string, cliente.id as string);
+      anexoPath = guardado?.path ?? null;
+      anexoBase64 = guardado?.base64 ?? null;
     }
 
     // Se já existe um wizard de criação em andamento pra esse cliente, TODA
@@ -1070,15 +1184,17 @@ Deno.serve(async (req) => {
 
     let pendenciaId: string | null = null;
     if (!temWizardEmAndamento && !querNovaExplicitamente && candidatas && candidatas.length >= 1) {
-      if (anexoPath && candidatas.length === 1) {
-        // Anexo é sinal forte o bastante de que é resposta à pendência — não
-        // precisa confirmar com o Claude.
+      if (candidatas.length === 1) {
+        // Só há uma pendência aberta pra esse cliente — não tem ambiguidade
+        // real pra resolver, então qualquer resposta (com ou sem anexo) é
+        // tratada como sendo dela. Se não veio anexo, o próprio fluxo abaixo
+        // já responde deixando claro que ainda estamos aguardando o arquivo,
+        // sem marcar a pendência como em análise.
         pendenciaId = candidatas[0].id as string;
       } else {
-        // Só texto (ou anexo com mais de uma pendência aberta): sempre confirma
-        // com o Claude, mesmo havendo uma única candidata — senão qualquer
-        // mensagem solta ("oi", "olá") vira silenciosamente uma "resposta" à
-        // pendência aberta, mesmo sem relação nenhuma com ela.
+        // Mais de uma pendência aberta: sempre confirma com o Claude, mesmo
+        // com anexo, já que não dá pra saber a qual pendência a resposta se
+        // refere sem isso.
         const textoParaClaude = conteudo.texto
           ?? (conteudo.midia ? `[arquivo enviado: ${conteudo.midia.fileName}]` : null);
         if (textoParaClaude) {
@@ -1110,34 +1226,53 @@ Deno.serve(async (req) => {
       });
       await supabase.from('pendix_conversas').update({ atualizada_em: new Date().toISOString() }).eq('id', conversaId);
 
-      const nomeDocumento = candidatas?.find((c: any) => c.id === pendenciaId)?.nome_documento ?? 'documento';
+      const pendenciaMatch = candidatas?.find((c: any) => c.id === pendenciaId);
+      const nomeDocumento = pendenciaMatch?.nome_documento ?? 'documento';
 
       if (anexoPath) {
+        // Analisa o conteúdo de verdade do arquivo (não só o nome) antes de
+        // decidir o que fazer — só finaliza sozinho quando o Claude confirma
+        // com confiança que é o documento certo; qualquer outra coisa (não
+        // bateu, tipo de arquivo sem suporte a análise, IA indisponível)
+        // continua indo pra revisão humana, igual ao comportamento anterior.
+        const validacao = (anexoBase64 && conteudo.midia)
+          ? await validarDocumentoComClaude(nomeDocumento, pendenciaMatch?.competencia ?? '', conteudo.midia, anexoBase64)
+          : null;
+        const aprovado = validacao?.valido === true;
+
         await supabase.from('pendix_pendencias').update({
-          status: 'em_analise',
-          requer_revisao_humana: true,
+          status: aprovado ? 'recebido' : 'em_analise',
+          requer_revisao_humana: !aprovado,
           arquivo_url: anexoPath,
           arquivo_nome: conteudo.midia?.fileName ?? null,
+          ...(aprovado ? { data_recebimento: new Date().toISOString() } : {}),
         }).eq('id', pendenciaId);
 
         await supabase.from('pendix_historico').insert({
           escritorio_id: cliente.escritorio_id,
           cliente_id: cliente.id,
           pendencia_id: pendenciaId,
-          acao: 'documento_em_revisao',
-          descricao: conteudo.texto ?? `Arquivo recebido: ${conteudo.midia?.fileName ?? ''}`,
-          usuario_nome: 'WhatsApp (automático)',
+          acao: aprovado ? 'documento_aprovado' : (validacao ? 'documento_reprovado' : 'documento_em_revisao'),
+          descricao: validacao?.motivo
+            ? `${aprovado ? 'Validado automaticamente pela IA' : 'IA sinalizou possível problema'}: ${validacao.motivo}`
+            : (conteudo.texto ?? `Arquivo recebido: ${conteudo.midia?.fileName ?? ''}`),
+          usuario_nome: aprovado || validacao ? 'IA (automático)' : 'WhatsApp (automático)',
         });
 
         await enviarRespostaWhatsApp(
           payload.phone,
-          `📎 Recebemos seu envio para *${nomeDocumento}*! Vamos analisar e te avisamos por aqui se precisar de mais alguma coisa.`,
+          aprovado
+            ? `✅ Recebemos e conferimos seu envio para *${nomeDocumento}*! Está tudo certo, muito obrigado! 😊`
+            : validacao
+              ? `Recebemos seu arquivo, mas não conseguimos confirmar que é o(a) *${nomeDocumento}* certo(a) — ${validacao.motivo} Pode conferir e reenviar, por favor? 🙏`
+              : `📎 Recebemos seu envio para *${nomeDocumento}*! Vamos analisar e te avisamos por aqui se precisar de mais alguma coisa.`,
         );
       } else {
-        await supabase.from('pendix_pendencias')
-          .update({ status: 'em_analise' })
-          .eq('id', pendenciaId).eq('status', 'pendente');
-
+        // Sem anexo: nenhum documento foi de fato enviado, então a pendência
+        // continua 'pendente' (não vira 'em_analise' — isso é só pra quando
+        // chega um arquivo de verdade) e a resposta deixa claro que ainda
+        // estamos aguardando o envio, em vez de dar a entender que algo já
+        // foi recebido para análise.
         await supabase.from('pendix_historico').insert({
           escritorio_id: cliente.escritorio_id,
           cliente_id: cliente.id,
@@ -1149,7 +1284,7 @@ Deno.serve(async (req) => {
 
         await enviarRespostaWhatsApp(
           payload.phone,
-          `Recebemos sua mensagem sobre *${nomeDocumento}*! Nossa equipe vai analisar e retorna por aqui se precisar de mais alguma coisa.`,
+          `Certo! Ficamos no aguardo do envio de *${nomeDocumento}* — pode mandar por aqui mesmo, em foto ou PDF, assim que puder. Tenha um ótimo dia! 😊`,
         );
       }
 

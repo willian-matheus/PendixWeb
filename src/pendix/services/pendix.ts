@@ -86,6 +86,8 @@ export interface PendixPendencia {
   arquivo_modelo_url?: string;
   arquivo_modelo_nome?: string;
   datas_notificacao?: string[];
+  datas_notificacao_enviadas?: string[];
+  horario_notificacao?: string;
   created_at: string;
   updated_at: string;
   pendix_clientes?: { nome: string; telefone?: string };
@@ -231,7 +233,8 @@ export async function updatePendixPendenciaCampos(
   p: Partial<Pick<PendixPendencia,
     'nome_documento' | 'competencia' | 'data_limite' | 'observacoes' |
     'tipo' | 'descricao' | 'prioridade' | 'data_inicio_cobranca' |
-    'arquivo_modelo_url' | 'arquivo_modelo_nome' | 'datas_notificacao'
+    'arquivo_modelo_url' | 'arquivo_modelo_nome' | 'datas_notificacao' |
+    'horario_notificacao'
   >>
 ) {
   const { data, error } = await supabase

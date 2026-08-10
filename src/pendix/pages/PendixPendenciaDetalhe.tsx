@@ -9,6 +9,7 @@ import { useTheme } from '../../app/theme/ThemeProvider';
 import { toast } from 'sonner';
 import {
   getPendixPendenciaPorId, updatePendixPendenciaStatus, addPendixHistorico, getPendenciaExtra,
+  getPendixAnexoUrl,
   type PendixPendencia, type PendixPendenciaStatus,
 } from '../services/pendix';
 import { getPendixEmpresas, type PendixEmpresa } from '../services/empresas';
@@ -121,6 +122,15 @@ export default function PendixPendenciaDetalhe() {
     window.open(`https://wa.me/${num}?text=${msg}`, '_blank');
   }
 
+  async function abrirAnexo(path: string) {
+    try {
+      const url = await getPendixAnexoUrl(path);
+      window.open(url, '_blank');
+    } catch {
+      toast.error('Erro ao abrir anexo');
+    }
+  }
+
   // Timeline — passos alcançados de acordo com o status atual.
   const ordem: PendixPendenciaStatus[] = ['pendente', 'em_analise', 'recebido'];
   const posicaoAtual = pendencia.status === 'cancelado' || pendencia.status === 'rejeitado' ? -1 : ordem.indexOf(pendencia.status);
@@ -185,6 +195,7 @@ export default function PendixPendenciaDetalhe() {
             <div className="grid sm:grid-cols-2 gap-4">
               <div><p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${c.label}`}>Vencimento</p><p className="text-sm">{pendencia.data_limite || '—'}</p></div>
               <div><p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${c.label}`}>Data inicial da cobrança</p><p className="text-sm">{pendencia.data_inicio_cobranca || '—'}</p></div>
+              <div><p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${c.label}`}>Horário de notificação</p><p className="text-sm">{pendencia.horario_notificacao?.slice(0, 5) || '—'}</p></div>
               <div><p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${c.label}`}>Notificações extras</p><p className="text-sm">{pendencia.datas_notificacao?.length ? pendencia.datas_notificacao.join(', ') : '—'}</p></div>
               <div><p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${c.label}`}>Tipo</p><p className="text-sm capitalize">{pendencia.tipo === 'empresa' ? 'Empresa' : 'Cliente'}</p></div>
             </div>
@@ -265,14 +276,43 @@ export default function PendixPendenciaDetalhe() {
               <Paperclip size={14} className="text-purple-400" />
               <p className={`text-xs font-bold uppercase tracking-widest ${c.label}`}>Anexos</p>
             </div>
-            {pendencia.arquivo_modelo_nome ? (
-              <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs ${isDark ? 'bg-white/3 border-white/5' : 'bg-gray-50 border-gray-100'}`}>
-                <FileText size={13} className="text-purple-400 shrink-0" />
-                <span className="truncate">{pendencia.arquivo_modelo_nome}</span>
+            <div className="space-y-3">
+              <div>
+                <p className={`text-[10px] font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Documento enviado pelo cliente</p>
+                {pendencia.arquivo_nome && pendencia.arquivo_url ? (
+                  <button
+                    onClick={() => abrirAnexo(pendencia.arquivo_url!)}
+                    className={`flex items-center gap-2 w-full px-3 py-2 rounded-xl border text-xs text-left transition-colors ${isDark ? 'bg-white/3 border-white/5 hover:bg-white/8' : 'bg-gray-50 border-gray-100 hover:bg-gray-100'}`}
+                  >
+                    <FileText size={13} className="text-emerald-400 shrink-0" />
+                    <span className="truncate flex-1">{pendencia.arquivo_nome}</span>
+                  </button>
+                ) : (
+                  <p className={`text-xs ${c.muted}`}>Ainda não recebemos o documento.</p>
+                )}
               </div>
-            ) : (
-              <p className={`text-xs ${c.muted}`}>Nenhum anexo de exemplo enviado.</p>
-            )}
+              <div>
+                <p className={`text-[10px] font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Anexo de exemplo</p>
+                {pendencia.arquivo_modelo_nome ? (
+                  pendencia.arquivo_modelo_url ? (
+                    <button
+                      onClick={() => abrirAnexo(pendencia.arquivo_modelo_url!)}
+                      className={`flex items-center gap-2 w-full px-3 py-2 rounded-xl border text-xs text-left transition-colors ${isDark ? 'bg-white/3 border-white/5 hover:bg-white/8' : 'bg-gray-50 border-gray-100 hover:bg-gray-100'}`}
+                    >
+                      <FileText size={13} className="text-purple-400 shrink-0" />
+                      <span className="truncate flex-1">{pendencia.arquivo_modelo_nome}</span>
+                    </button>
+                  ) : (
+                    <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs ${isDark ? 'bg-white/3 border-white/5' : 'bg-gray-50 border-gray-100'}`}>
+                      <FileText size={13} className="text-purple-400 shrink-0" />
+                      <span className="truncate">{pendencia.arquivo_modelo_nome}</span>
+                    </div>
+                  )
+                ) : (
+                  <p className={`text-xs ${c.muted}`}>Nenhum anexo de exemplo enviado.</p>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* Alterar status */}
