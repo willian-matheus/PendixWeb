@@ -690,11 +690,11 @@ function pareceQuerNovaPendenciaExplicitamente(texto: string): boolean {
 
 type PassoId =
   | 'tipo' | 'selecionar_cliente' | 'titulo' | 'descricao' | 'prioridade' | 'competencia'
-  | 'data_limite' | 'data_inicio_cobranca' | 'anexo' | 'observacao_interna' | 'confirmacao';
+  | 'data_limite' | 'data_inicio_cobranca' | 'horario_notificacao' | 'anexo' | 'observacao_interna' | 'confirmacao';
 
 const ORDEM_PASSOS: PassoId[] = [
   'tipo', 'selecionar_cliente', 'titulo', 'descricao', 'prioridade', 'competencia',
-  'data_limite', 'data_inicio_cobranca', 'anexo', 'observacao_interna', 'confirmacao',
+  'data_limite', 'data_inicio_cobranca', 'horario_notificacao', 'anexo', 'observacao_interna', 'confirmacao',
 ];
 
 interface DadosColeta {
@@ -707,6 +707,7 @@ interface DadosColeta {
   competencia?: string;
   data_limite?: string;
   data_inicio_cobranca?: string;
+  horario_notificacao?: string;
   arquivo_modelo_url?: string;
   arquivo_modelo_nome?: string | null;
   observacao_interna?: string;
@@ -753,6 +754,13 @@ function parseData(texto: string): string | null {
   return null;
 }
 
+function parseHorario(texto: string): string | null {
+  const t = texto.trim();
+  const m = t.match(/^([01]?\d|2[0-3])[:h]([0-5]\d)$/);
+  if (!m) return null;
+  return `${m[1].padStart(2, '0')}:${m[2]}`;
+}
+
 // Todos os cadastros do Pendix (pendix_clientes) do escritório — usado pro
 // passo "selecionar_cliente", pra deixar explícito pra qual cadastro a
 // pendência está sendo criada. Sempre lista todo mundo do escritório (não só
@@ -782,6 +790,7 @@ function resumoTexto(dados: DadosColeta, nomeCliente: string): string {
   linhas.push(`Competência: ${dados.competencia}`);
   if (dados.data_limite) linhas.push(`Vencimento: ${dados.data_limite}`);
   if (dados.data_inicio_cobranca) linhas.push(`Início da cobrança: ${dados.data_inicio_cobranca}`);
+  linhas.push(`Horário de notificação: ${dados.horario_notificacao ?? '09:00 (padrão)'}`);
   if (dados.arquivo_modelo_nome) linhas.push(`Anexo de exemplo: ${dados.arquivo_modelo_nome}`);
   if (dados.observacao_interna) linhas.push(`Observação interna: ${dados.observacao_interna}`);
   linhas.push('', 'Posso confirmar e criar essa pendência?');
@@ -832,6 +841,11 @@ function mensagemDoPasso(
       return {
         texto: 'Quando devemos começar a *cobrar* esse documento? Mande uma data no formato DD/MM/AAAA. _(obrigatório para controle de pendências)_',
         botoes: [],
+      };
+    case 'horario_notificacao':
+      return {
+        texto: 'A que *horário* você quer que a gente envie as cobranças desse documento por aqui? Mande no formato HH:MM (ex: 09:00), ou toque em Pular para usar o horário padrão (09:00).',
+        botoes: [{ id: 'pular', label: 'Pular' }],
       };
     case 'anexo':
       return {
@@ -885,6 +899,7 @@ async function criarPendenciaFinal(
   if (dados.descricao) payload.descricao = dados.descricao;
   if (dados.data_limite) payload.data_limite = dados.data_limite;
   if (dados.data_inicio_cobranca) payload.data_inicio_cobranca = dados.data_inicio_cobranca;
+  if (dados.horario_notificacao) payload.horario_notificacao = dados.horario_notificacao;
   if (dados.observacao_interna) payload.observacoes = dados.observacao_interna;
   if (dados.arquivo_modelo_url) {
     payload.arquivo_modelo_url = dados.arquivo_modelo_url;
@@ -1032,6 +1047,12 @@ async function processarPassoColeta(
       dados.data_inicio_cobranca = dataInicio;
       break;
     }
+    case 'horario_notificacao':
+      if (!pulou) {
+        const horario = parseHorario(conteudoTexto);
+        if (horario) dados.horario_notificacao = horario;
+      }
+      break;
     case 'anexo':
       if (!anexoPath || midiaKind === 'audio') {
         await reenviarPassoObrigatorio(supabase, sessionId, telefone, passo, dados, nomeCliente);
