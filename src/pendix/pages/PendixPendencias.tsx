@@ -62,6 +62,7 @@ const EMPTY_FORM = {
   competencia: mesAtual(),
   dataVencimento: '',
   dataInicioCobranca: '',
+  horarioNotificacao: '09:00',
   notificarMultiplasVezes: false,
   datasNotificacao: ['', '', ''] as string[],
   anexoNome: '',
@@ -204,6 +205,7 @@ export default function PendixPendencias() {
       competencia: p.competencia,
       dataVencimento: p.data_limite ?? '',
       dataInicioCobranca: p.data_inicio_cobranca ?? '',
+      horarioNotificacao: p.horario_notificacao?.slice(0, 5) || '09:00',
       notificarMultiplasVezes: (p.datas_notificacao?.length ?? 0) > 0,
       datasNotificacao: Array.from({ length: MAX_NOTIFICACOES_EXTRA }, (_, i) => p.datas_notificacao?.[i] ?? ''),
       anexoNome: p.arquivo_modelo_nome ?? '',
@@ -229,6 +231,7 @@ export default function PendixPendencias() {
         descricao: form.descricao || undefined,
         prioridade: form.prioridade,
         data_inicio_cobranca: form.dataInicioCobranca || undefined,
+        horario_notificacao: form.horarioNotificacao || '09:00',
         arquivo_modelo_nome: form.anexoNome || undefined,
         datas_notificacao: form.notificarMultiplasVezes ? form.datasNotificacao.filter(Boolean) : [],
       };
@@ -578,6 +581,15 @@ export default function PendixPendencias() {
                     className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.input}`}
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Horário de notificação</label>
+                <input
+                  type="time" value={form.horarioNotificacao} onChange={e => setForm(p => ({ ...p, horarioNotificacao: e.target.value }))}
+                  className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.input}`}
+                />
+                <p className={`text-[10px] mt-1 ${c.muted}`}>Horário em que a cobrança inicial e os lembretes via WhatsApp serão enviados automaticamente.</p>
               </div>
 
               <div>
