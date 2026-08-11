@@ -1018,6 +1018,19 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ignored: true, reason: 'fromMe' }), { status: 200 });
     }
 
+    // Z-API reentrega o mesmo webhook às vezes (at-least-once delivery).
+    // Sem essa trava, o wizard processa a mesma mensagem do cliente duas
+    // vezes e o passo avança sozinho, desalinhando a próxima resposta real.
+    const messageId = payload.messageId ? String(payload.messageId) : null;
+    if (messageId) {
+      const { error: dedupError } = await supabase
+        .from('pendix_whatsapp_eventos_processados')
+        .insert({ message_id: messageId });
+      if (dedupError) {
+        return new Response(JSON.stringify({ ignored: true, reason: 'duplicate' }), { status: 200 });
+      }
+    }
+
     const conteudo = extrairConteudo(payload);
     const botaoId = extrairBotaoId(payload);
     if (!conteudo.texto && !conteudo.midia && !botaoId) {
