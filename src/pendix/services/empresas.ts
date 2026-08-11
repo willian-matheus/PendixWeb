@@ -5,9 +5,26 @@ import { readLocal, writeLocal, uid } from '../lib/localStore';
 // so data lives in localStorage until a real `pendix_empresas` table exists —
 // swap these functions for Supabase calls (same shape as services/pendix.ts)
 // once the schema is ready.
-
-const KEY_EMPRESAS = 'pendix_mock_empresas_v1';
-const KEY_LINKS = 'pendix_mock_cliente_empresa_v1'; // clienteId -> empresaId
+//
+// Duplicado (não importado) de services/pendix.ts pra evitar import
+// circular — pendix.ts já importa deste arquivo. As chaves de localStorage
+// são escopadas por escritório: sem isso, um escritório via as empresas
+// cadastradas por outro assim que fizesse login no mesmo navegador.
+function getSessionUser(): { officeId?: string } | null {
+  try { return JSON.parse(localStorage.getItem('flash_user') || 'null'); }
+  catch { return null; }
+}
+function sessionScopeId(): string {
+  return localStorage.getItem('flash_impersonated_office_id')
+    || getSessionUser()?.officeId
+    || 'sem-escritorio';
+}
+function keyEmpresas(): string {
+  return `pendix_mock_empresas_v1:${sessionScopeId()}`;
+}
+function keyLinks(): string {
+  return `pendix_mock_cliente_empresa_v1:${sessionScopeId()}`;
+}
 
 export type PendixEmpresaStatus = 'ativa' | 'inativa';
 
@@ -46,10 +63,10 @@ const SEED: PendixEmpresa[] = [
 ];
 
 function loadAll(): PendixEmpresa[] {
-  return readLocal(KEY_EMPRESAS, SEED);
+  return readLocal(keyEmpresas(), SEED);
 }
 function saveAll(list: PendixEmpresa[]) {
-  writeLocal(KEY_EMPRESAS, list);
+  writeLocal(keyEmpresas(), list);
 }
 
 export async function getPendixEmpresas(): Promise<PendixEmpresa[]> {
@@ -80,11 +97,11 @@ export async function updatePendixEmpresa(
 
 export async function deletePendixEmpresa(id: string): Promise<void> {
   saveAll(loadAll().filter(e => e.id !== id));
-  const links = readLocal<Record<string, string>>(KEY_LINKS, {});
+  const links = readLocal<Record<string, string>>(keyLinks(), {});
   for (const clienteId of Object.keys(links)) {
     if (links[clienteId] === id) delete links[clienteId];
   }
-  writeLocal(KEY_LINKS, links);
+  writeLocal(keyLinks(), links);
 }
 
 // ── Vínculo cliente ↔ empresa ────────────────────────────────────────────
@@ -92,7 +109,7 @@ export async function deletePendixEmpresa(id: string): Promise<void> {
 // fica local, à parte da linha real do cliente no Supabase.
 
 export function getClienteEmpresaLinks(): Record<string, string> {
-  return readLocal<Record<string, string>>(KEY_LINKS, {});
+  return readLocal<Record<string, string>>(keyLinks(), {});
 }
 
 export function getEmpresaIdDoCliente(clienteId: string): string | null {
@@ -103,7 +120,7 @@ export function setEmpresaDoCliente(clienteId: string, empresaId: string | null)
   const links = getClienteEmpresaLinks();
   if (empresaId) links[clienteId] = empresaId;
   else delete links[clienteId];
-  writeLocal(KEY_LINKS, links);
+  writeLocal(keyLinks(), links);
 }
 
 export function getClientesIdsDaEmpresa(empresaId: string): string[] {

@@ -13,6 +13,10 @@ import {
   type PendixPendencia, type PendixPendenciaStatus,
 } from '../services/pendix';
 import { getPendixEmpresas, type PendixEmpresa } from '../services/empresas';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '../../app/components/ui/alert-dialog';
 
 const STATUS_CONFIG: Record<PendixPendenciaStatus, { label: string; color: string; icon: React.ComponentType<any> }> = {
   pendente:   { label: 'Pendente',   color: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/20',    icon: Clock },
@@ -40,6 +44,7 @@ export default function PendixPendenciaDetalhe() {
   const [empresa, setEmpresa] = useState<PendixEmpresa | null>(null);
   const [loading, setLoading] = useState(true);
   const [atualizando, setAtualizando] = useState(false);
+  const [confirmandoStatus, setConfirmandoStatus] = useState<PendixPendenciaStatus | null>(null);
 
   const c = {
     page:  isDark ? 'text-gray-200' : 'text-gray-900',
@@ -52,6 +57,10 @@ export default function PendixPendenciaDetalhe() {
   async function load() {
     if (!id) return;
     setLoading(true);
+    // Limpa a pendência anterior antes de buscar a nova — sem isso, se a
+    // busca falhar (rede, registro removido, RLS), a tela continuava
+    // mostrando os dados da pendência antiga sob a URL da nova.
+    setPendencia(null);
     try {
       const p = await getPendixPendenciaPorId(id);
       setPendencia(p);
@@ -120,6 +129,21 @@ export default function PendixPendenciaDetalhe() {
     const num = '55' + tel.replace(/\D/g, '');
     const msg = encodeURIComponent(`Olá, identificamos que ainda não recebemos "${pendencia.nome_documento}". Por favor, envie o documento para prosseguirmos.`);
     window.open(`https://wa.me/${num}?text=${msg}`, '_blank');
+    // A cobrança feita pela lista (PendixPendencias.tsx) já registra isso no
+    // histórico — aqui não registrava, então a mesma ação tinha rastro de
+    // auditoria diferente dependendo de qual tela disparou.
+    addPendixHistorico({
+      escritorio_id: pendencia.escritorio_id, pendencia_id: pendencia.id, cliente_id: pendencia.cliente_id,
+      acao: 'Cobrança enviada via WhatsApp',
+      descricao: `Competência ${pendencia.competencia} — ${pendencia.nome_documento}`,
+    });
+  }
+
+  // Cancelado/Rejeitado não têm confirmação — um clique errado muda o status
+  // na hora, sem chance de desfazer. Passa por um AlertDialog antes.
+  function onClickStatus(s: PendixPendenciaStatus) {
+    if (s === 'cancelado' || s === 'rejeitado') setConfirmandoStatus(s);
+    else changeStatus(s);
   }
 
   async function abrirAnexo(path: string) {
@@ -132,8 +156,15 @@ export default function PendixPendenciaDetalhe() {
   }
 
   // Timeline — passos alcançados de acordo com o status atual.
+  // 'rejeitado' significa que o documento chegou a ser analisado e recusado
+  // (não que nada aconteceu) — mostra progresso até "em análise", não zera
+  // a timeline inteira como fazia antes. 'cancelado' pode acontecer em
+  // qualquer estágio sem revisão, então continua sem progresso assumido.
   const ordem: PendixPendenciaStatus[] = ['pendente', 'em_analise', 'recebido'];
-  const posicaoAtual = pendencia.status === 'cancelado' || pendencia.status === 'rejeitado' ? -1 : ordem.indexOf(pendencia.status);
+  const posicaoAtual =
+    pendencia.status === 'cancelado' ? -1 :
+    pendencia.status === 'rejeitado' ? ordem.indexOf('em_analise') :
+    ordem.indexOf(pendencia.status);
   const stepAlcancado = (key: string) => {
     if (key === 'criada') return true;
     if (posicaoAtual === -1) return false;
@@ -323,7 +354,7 @@ export default function PendixPendenciaDetalhe() {
                 <button
                   key={s}
                   disabled={pendencia.status === s || atualizando}
-                  onClick={() => changeStatus(s)}
+                  onClick={() => onClickStatus(s)}
                   className={`text-[11px] font-bold px-3 py-1.5 rounded-full border transition-all disabled:opacity-40 ${pendencia.status === s ? cfg2.color : (isDark ? 'border-white/10 text-gray-400 hover:border-white/20' : 'border-gray-200 text-gray-500 hover:border-gray-300')}`}
                 >
                   {cfg2.label}
@@ -333,6 +364,31 @@ export default function PendixPendenciaDetalhe() {
           </div>
         </div>
       </div>
+
+      <AlertDialog open={!!confirmandoStatus} onOpenChange={(open) => !open && !atualizando && setConfirmandoStatus(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar mudança de status</AlertDialogTitle>
+            <AlertDialogDescription>
+              Marcar esta pendência como <strong>{confirmandoStatus ? STATUS_CONFIG[confirmandoStatus].label : ''}</strong>? Essa ação não tem desfazer automático.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={atualizando}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={atualizando}
+              onClick={async () => {
+                if (!confirmandoStatus) return;
+                await changeStatus(confirmandoStatus);
+                setConfirmandoStatus(null);
+              }}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Confirmar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

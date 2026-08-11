@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { User, Lock, Palette, CreditCard, Sun, Moon, LogOut, Check, MessageCircle } from 'lucide-react';
 import { useTheme } from '../../app/theme/ThemeProvider';
 import { useAccentColor, ACCENT_COLORS, type AccentColorId } from '../../app/theme/AccentColorProvider';
 import { useAuth } from '../../app/auth/AuthProvider';
+import { supabase } from '../../app/services/supabase';
 import { toast } from 'sonner';
 
 const CORES = (Object.keys(ACCENT_COLORS) as AccentColorId[]).map(id => ({ id, ...ACCENT_COLORS[id] }));
@@ -13,13 +14,26 @@ const WHATSAPP_PENDIX_NUMERO = '47991964449';
 export default function PendixConfiguracoes() {
   const { theme, toggleTheme } = useTheme();
   const { accent, setAccent } = useAccentColor();
-  const { user, signOut, updatePassword } = useAuth();
+  const { user, signOut, updatePassword, refreshUser } = useAuth();
   const isDark = theme === 'dark';
 
   const [nome, setNome] = useState(user?.nome ?? '');
   const [email] = useState(user?.email ?? '');
   const [telefone, setTelefone] = useState('');
   const [savingPerfil, setSavingPerfil] = useState(false);
+
+  // `user` chega de forma assíncrona (o AuthProvider libera a navegação
+  // antes do perfil terminar de carregar) — sem sincronizar aqui, quem entra
+  // direto nessa página logo após o login vê o campo Nome em branco.
+  useEffect(() => {
+    setNome(user?.nome ?? '');
+  }, [user?.nome]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase.from('usuarios').select('telefone').eq('id', user.id).maybeSingle()
+      .then(({ data }) => setTelefone(data?.telefone ?? ''));
+  }, [user?.id]);
 
   const [senhaAtual, setSenhaAtual] = useState('');
   const [novaSenha, setNovaSenha] = useState('');
@@ -34,20 +48,33 @@ export default function PendixConfiguracoes() {
     label: isDark ? 'text-gray-400' : 'text-gray-600',
   };
 
-  function handleSalvarPerfil() {
+  async function handleSalvarPerfil() {
+    if (!user?.id) { toast.error('Sessão inválida — faça login novamente.'); return; }
     setSavingPerfil(true);
-    setTimeout(() => {
+    try {
+      const { error } = await supabase.from('usuarios').update({ nome, telefone }).eq('id', user.id);
+      if (error) throw error;
+      await refreshUser();
       toast.success('Perfil atualizado');
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao atualizar perfil');
+    } finally {
       setSavingPerfil(false);
-    }, 400);
+    }
   }
 
   async function handleSalvarSenha() {
     if (!senhaAtual || !novaSenha || !confirmarSenha) { toast.error('Preencha todos os campos de senha'); return; }
     if (novaSenha.length < 6) { toast.error('A nova senha deve ter pelo menos 6 caracteres'); return; }
     if (novaSenha !== confirmarSenha) { toast.error('As senhas não coincidem'); return; }
+    if (!user?.email) { toast.error('Sessão inválida — faça login novamente.'); return; }
     setSavingSenha(true);
     try {
+      // Supabase não tem um método dedicado de "reautenticar" — confirma a
+      // senha atual fazendo login de novo com ela antes de trocar. Sem isso,
+      // o campo "Senha atual" só dava a impressão de estar sendo validado.
+      const { error: authError } = await supabase.auth.signInWithPassword({ email: user.email, password: senhaAtual });
+      if (authError) { toast.error('Senha atual incorreta.'); return; }
       await updatePassword(novaSenha);
       toast.success('Senha atualizada');
       setSenhaAtual(''); setNovaSenha(''); setConfirmarSenha('');

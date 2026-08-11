@@ -55,6 +55,17 @@ function tipoDeAcao(acao: string): TipoAcao {
   return 'outro';
 }
 
+// `created_at` é UTC — comparar com `.slice(0, 10)` cru dá o dia errado pra
+// quem está em UTC-3 (ex: algo das 22h locais vira "amanhã" em UTC). Usa a
+// data local, igual ao que `groupByDate` já faz pros cabeçalhos abaixo.
+function toLocalDateKey(iso: string): string {
+  const d = new Date(iso);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 function groupByDate(entries: PendixHistoricoEntry[]) {
   const groups: Record<string, PendixHistoricoEntry[]> = {};
   for (const e of entries) {
@@ -108,7 +119,7 @@ export default function PendixHistorico() {
 
   const filtered = historico.filter(e => {
     if (filterTipo && tipoDeAcao(e.acao) !== filterTipo) return false;
-    if (filterData && e.created_at.slice(0, 10) !== filterData) return false;
+    if (filterData && toLocalDateKey(e.created_at) !== filterData) return false;
     if (!search) return true;
     return (
       e.acao.toLowerCase().includes(search.toLowerCase()) ||

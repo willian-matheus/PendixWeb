@@ -39,13 +39,6 @@ function mesAtual() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-function ultimosMesesFake() {
-  // Volume histórico ilustrativo — só há dados reais para a competência atual.
-  const nomes = ['Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago'];
-  const base = [18, 24, 21, 30, 27, 33];
-  return nomes.map((mes, i) => ({ mes, pendencias: base[i] }));
-}
-
 export default function PendixDashboard() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
@@ -69,22 +62,36 @@ export default function PendixDashboard() {
 
   async function load() {
     setLoading(true);
-    try {
-      const [s, p, cl, hist] = await Promise.all([
-        getPendixStats(),
-        getPendixPendencias({ competencia }),
-        getPendixClientes(),
-        getPendixHistorico(),
-      ]);
-      setStats(s);
-      setPendencias(p);
-      setClientes(cl);
-      setAtividades(hist.slice(0, 6));
-    } catch {
-      toast.error('Erro ao carregar dados do Pendix');
-    } finally {
-      setLoading(false);
+    // Promise.allSettled em vez de Promise.all: antes, se qualquer uma das
+    // 4 chamadas falhasse, NENHUM state era atualizado e o dashboard inteiro
+    // ficava zerado mesmo quando 3 das 4 tinham dado certo.
+    const [s, p, cl, hist] = await Promise.allSettled([
+      getPendixStats(),
+      // Sem filtro de competência — os cards de "Total"/"Vencidas" já são
+      // globais, e o resto do dashboard (gráficos, Próximas Cobranças)
+      // precisa usar o mesmo escopo, senão os números não batem e
+      // pendências vencidas de meses anteriores ficam invisíveis.
+      getPendixPendencias(),
+      getPendixClientes(),
+      getPendixHistorico(),
+    ]);
+
+    if (s.status === 'fulfilled') setStats(s.value);
+    else console.error('dashboard: falha ao carregar stats', s.reason);
+
+    if (p.status === 'fulfilled') setPendencias(p.value);
+    else console.error('dashboard: falha ao carregar pendências', p.reason);
+
+    if (cl.status === 'fulfilled') setClientes(cl.value);
+    else console.error('dashboard: falha ao carregar clientes', cl.reason);
+
+    if (hist.status === 'fulfilled') setAtividades(hist.value.slice(0, 6));
+    else console.error('dashboard: falha ao carregar histórico', hist.reason);
+
+    if ([s, p, cl, hist].some(r => r.status === 'rejected')) {
+      toast.error('Alguns dados do Pendix não puderam ser carregados — tente atualizar.');
     }
+    setLoading(false);
   }
 
   useEffect(() => { load(); }, []);
@@ -131,7 +138,18 @@ export default function PendixDashboard() {
     return Object.entries(counts).map(([k, value]) => ({ name: PRIORIDADE_LABEL[k], value, color: PRIORIDADE_HEX[k] }));
   }, [pendencias]);
 
-  const porMesData = useMemo(() => ultimosMesesFake(), []);
+  const porMesData = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const p of pendencias) counts[p.competencia] = (counts[p.competencia] ?? 0) + 1;
+    const competencias = Object.keys(counts).sort().slice(-6);
+    return competencias.map(comp => {
+      const [ano, mes] = comp.split('-');
+      const label = new Date(Number(ano), Number(mes) - 1, 1)
+        .toLocaleDateString('pt-BR', { month: 'short' })
+        .replace('.', '');
+      return { mes: label.charAt(0).toUpperCase() + label.slice(1), pendencias: counts[comp] };
+    });
+  }, [pendencias]);
 
   const proximasCobrancas = pendencias
     .filter(p => p.data_limite && (p.status === 'pendente' || p.status === 'em_analise'))
@@ -150,7 +168,7 @@ export default function PendixDashboard() {
             <span className="text-xs font-bold uppercase tracking-widest text-purple-400">Pendix</span>
           </div>
           <h1 className="text-2xl font-black tracking-tight">Dashboard</h1>
-          <p className={`text-sm mt-1 ${c.muted}`}>Visão geral de pendências — competência {competencia}</p>
+          <p className={`text-sm mt-1 ${c.muted}`}>Visão geral de todas as pendências em aberto</p>
         </div>
         <div className="flex items-center gap-3">
           <button

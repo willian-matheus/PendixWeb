@@ -86,6 +86,9 @@ export default function PendixClientes() {
   const [savingDoc, setSavingDoc] = useState(false);
 
   const [excluindo, setExcluindo] = useState<{ id: string; nome: string } | null>(null);
+  const [deletando, setDeletando] = useState(false);
+  const [excluindoDoc, setExcluindoDoc] = useState<{ id: string; clienteId: string; nome: string } | null>(null);
+  const [deletandoDoc, setDeletandoDoc] = useState(false);
 
   const c = {
     page:    isDark ? 'text-gray-200'                    : 'text-gray-900',
@@ -157,14 +160,16 @@ export default function PendixClientes() {
   }
 
   async function handleDelete() {
-    if (!excluindo) return;
+    if (!excluindo || deletando) return;
+    setDeletando(true);
     try {
       await deletePendixCliente(excluindo.id);
       setEmpresaDoCliente(excluindo.id, null);
       setClientes(prev => prev.filter(c => c.id !== excluindo.id));
       toast.success('Cliente removido');
+      setExcluindo(null);
     } catch { toast.error('Erro ao remover cliente'); }
-    finally { setExcluindo(null); }
+    finally { setDeletando(false); }
   }
 
   function openDocModal(clienteId: string) {
@@ -188,12 +193,19 @@ export default function PendixClientes() {
     }
   }
 
-  async function handleDeleteDoc(docId: string, clienteId: string) {
+  async function handleDeleteDoc() {
+    if (!excluindoDoc || deletandoDoc) return;
+    setDeletandoDoc(true);
     try {
-      await deletePendixDocConfig(docId);
-      setDocs(prev => ({ ...prev, [clienteId]: (prev[clienteId] ?? []).filter(d => d.id !== docId) }));
+      await deletePendixDocConfig(excluindoDoc.id);
+      setDocs(prev => ({
+        ...prev,
+        [excluindoDoc.clienteId]: (prev[excluindoDoc.clienteId] ?? []).filter(d => d.id !== excluindoDoc.id),
+      }));
       toast.success('Documento removido');
+      setExcluindoDoc(null);
     } catch { toast.error('Erro ao remover documento'); }
+    finally { setDeletandoDoc(false); }
   }
 
   const filtered = clientes.filter(c =>
@@ -318,7 +330,7 @@ export default function PendixClientes() {
                           <span className="font-medium">{doc.nome}</span>
                           <span className={c.muted}>· dia {doc.dia_limite}</span>
                           <button
-                            onClick={() => handleDeleteDoc(doc.id, cl.id)}
+                            onClick={() => setExcluindoDoc({ id: doc.id, clienteId: cl.id, nome: doc.nome })}
                             className={`ml-1 ${c.muted} hover:text-red-400 transition-colors`}
                           >
                             <X size={11} />
@@ -565,8 +577,8 @@ export default function PendixClientes() {
         </div>
       )}
 
-      {/* Alert excluir */}
-      <AlertDialog open={!!excluindo} onOpenChange={() => setExcluindo(null)}>
+      {/* Alert excluir cliente */}
+      <AlertDialog open={!!excluindo} onOpenChange={(open) => !open && !deletando && setExcluindo(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Remover cliente</AlertDialogTitle>
@@ -575,9 +587,27 @@ export default function PendixClientes() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700">
-              Remover
+            <AlertDialogCancel disabled={deletando}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} disabled={deletando} className="bg-red-600 hover:bg-red-700">
+              {deletando ? 'Removendo...' : 'Remover'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Alert excluir documento */}
+      <AlertDialog open={!!excluindoDoc} onOpenChange={(open) => !open && !deletandoDoc && setExcluindoDoc(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remover documento</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja remover o documento <strong>{excluindoDoc?.nome}</strong> deste cliente?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletandoDoc}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteDoc} disabled={deletandoDoc} className="bg-red-600 hover:bg-red-700">
+              {deletandoDoc ? 'Removendo...' : 'Remover'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
