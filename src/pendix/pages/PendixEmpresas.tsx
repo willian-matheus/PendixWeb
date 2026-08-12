@@ -40,6 +40,7 @@ export default function PendixEmpresas() {
 
   const [visualizando, setVisualizando] = useState<PendixEmpresa | null>(null);
   const [excluindo, setExcluindo] = useState<{ id: string; nome: string } | null>(null);
+  const [deletando, setDeletando] = useState(false);
 
   const c = {
     page:   isDark ? 'text-gray-200'                    : 'text-gray-900',
@@ -89,13 +90,15 @@ export default function PendixEmpresas() {
   }
 
   async function handleDelete() {
-    if (!excluindo) return;
+    if (!excluindo || deletando) return;
+    setDeletando(true);
     try {
       await deletePendixEmpresa(excluindo.id);
       setEmpresas(prev => prev.filter(e => e.id !== excluindo.id));
       toast.success('Empresa removida');
+      setExcluindo(null);
     } catch { toast.error('Erro ao remover empresa'); }
-    finally { setExcluindo(null); }
+    finally { setDeletando(false); }
   }
 
   const filtered = empresas.filter(e =>
@@ -301,7 +304,7 @@ export default function PendixEmpresas() {
         </div>
       )}
 
-      <AlertDialog open={!!excluindo} onOpenChange={() => setExcluindo(null)}>
+      <AlertDialog open={!!excluindo} onOpenChange={(open) => !open && !deletando && setExcluindo(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Remover empresa</AlertDialogTitle>
@@ -310,9 +313,9 @@ export default function PendixEmpresas() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700">
-              Remover
+            <AlertDialogCancel disabled={deletando}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} disabled={deletando} className="bg-red-600 hover:bg-red-700">
+              {deletando ? 'Removendo...' : 'Remover'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

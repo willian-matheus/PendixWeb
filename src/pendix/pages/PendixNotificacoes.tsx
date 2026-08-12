@@ -14,6 +14,11 @@ const TIPO_CONFIG: Record<PendixNotificacaoTipo, { label: string; icon: React.Co
   documento_recebido:  { label: 'Documento recebido',                icon: FileCheck,     color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20' },
 };
 
+// Fallback pra um `tipo` fora dos 4 esperados — os dados vêm de localStorage
+// sem validação em runtime, então um valor inesperado não pode derrubar a
+// lista inteira (cfg.icon quebrava a renderização de todas as notificações).
+const TIPO_CONFIG_FALLBACK = { label: 'Notificação', icon: Bell, color: 'bg-gray-500/15 text-gray-400 border-gray-500/20' };
+
 function timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
   const m = Math.floor(diff / 60000);
@@ -117,7 +122,7 @@ export default function PendixNotificacoes() {
           </div>
         ) : (
           visiveis.map((n, i) => {
-            const cfg = TIPO_CONFIG[n.tipo];
+            const cfg = TIPO_CONFIG[n.tipo] ?? TIPO_CONFIG_FALLBACK;
             const Icon = cfg.icon;
             return (
               <button

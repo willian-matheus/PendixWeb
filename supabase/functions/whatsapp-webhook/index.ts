@@ -303,7 +303,7 @@ async function handleIdentificacaoFlow(
 
     if (cliente) {
       await supabase.from('pendix_clientes')
-        .update({ telefone: telefoneRaw })
+        .update({ telefone: telefoneRaw, telefone_verificado: true })
         .eq('id', cliente.id);
 
       await supabase.from('pendix_whatsapp_login_pendente')
@@ -498,10 +498,16 @@ async function transcreverAudio(urlPublica: string): Promise<string | null> {
       headers,
       body: JSON.stringify({ url: urlPublica, service: 'Standard', language: 'pt-BR' }),
     });
-    if (!respEnvio.ok) return null;
+    if (!respEnvio.ok) {
+      console.error('whatsapp-webhook: Transkriptor recusou envio', respEnvio.status, await respEnvio.text());
+      return null;
+    }
     const dataEnvio = await respEnvio.json();
     const orderId = dataEnvio?.body?.order_id ?? dataEnvio?.order_id;
-    if (!orderId) return null;
+    if (!orderId) {
+      console.error('whatsapp-webhook: Transkriptor não retornou order_id', JSON.stringify(dataEnvio));
+      return null;
+    }
 
     for (let tentativa = 0; tentativa < TRANSCRICAO_POLL_TENTATIVAS; tentativa++) {
       await new Promise((resolve) => setTimeout(resolve, TRANSCRICAO_POLL_INTERVALO_MS));
@@ -513,13 +519,19 @@ async function transcreverAudio(urlPublica: string): Promise<string | null> {
       });
 
       if (respExport.status === 202) continue; // ainda processando
-      if (!respExport.ok) return null;
+      if (!respExport.ok) {
+        console.error('whatsapp-webhook: Transkriptor recusou export', respExport.status, await respExport.text());
+        return null;
+      }
 
       const dataExport = await respExport.json();
       const texto = dataExport?.body?.content ?? dataExport?.content;
-      return typeof texto === 'string' && texto.trim() ? texto.trim() : null;
+      if (typeof texto === 'string' && texto.trim()) return texto.trim();
+      console.error('whatsapp-webhook: Transkriptor retornou texto vazio', JSON.stringify(dataExport));
+      return null;
     }
 
+    console.error('whatsapp-webhook: Transkriptor não terminou dentro do orçamento de tentativas', orderId);
     return null; // não terminou dentro do orçamento de tentativas
   } catch (err) {
     console.error('whatsapp-webhook: falha ao transcrever áudio', String(err));
@@ -1097,7 +1109,7 @@ async function processarPassoColeta(
 
 async function handleWhatsAppConversa(
   supabase: ReturnType<typeof createClient>,
-  cliente: { id: string; escritorio_id: string; nome?: string; email?: string },
+  cliente: { id: string; escritorio_id: string; nome?: string; email?: string; telefone_verificado?: boolean },
   telefone: string,
   conteudo: ConteudoRecebido,
   anexoPath: string | null,
@@ -1133,8 +1145,18 @@ async function handleWhatsAppConversa(
     );
   }
 
-  // Sem coleta ativa: inicia o wizard se a mensagem parece um pedido de pendência
+  // Sem coleta ativa: inicia o wizard se a mensagem parece um pedido de pendência —
+  // mas só para contatos que confirmaram o e-mail cadastrado pelo próprio WhatsApp
+  // (telefone_verificado). Um telefone cadastrado direto pela equipe do escritório,
+  // sem nunca ter passado por essa confirmação, não pode criar pendência nova.
   if (conteudo.texto && pareceQuerCriarPendencia(conteudo.texto)) {
+    if (!cliente.telefone_verificado) {
+      const msg = 'No momento não é possível criar uma pendência por aqui — seu contato ainda não está confirmado no Pendix. Fale com seu escritório de contabilidade se precisar de ajuda com isso. 🙏';
+      await supabase.from('pendix_chat_mensagens').insert({ session_id: sessionId, remetente: 'ia', conteudo: msg });
+      await enviarRespostaWhatsApp(telefone, msg);
+      return { ok: true };
+    }
+
     const novoEstado: EstadoColeta = { passo: 'tipo', dados: {} };
     await supabase.from('pendix_chat_sessions')
       .update({ coleta_estado: novoEstado, atualizada_em: new Date().toISOString() })
@@ -1236,7 +1258,7 @@ Deno.serve(async (req) => {
     const telefone = localPhoneDigits(payload.phone ?? '');
     const { data: clientes } = await supabase
       .from('pendix_clientes')
-      .select('id, escritorio_id, telefone, nome, email');
+      .select('id, escritorio_id, telefone, nome, email, telefone_verificado');
     const cliente = (clientes ?? []).find((c: any) => localPhoneDigits(c.telefone) === telefone);
 
     if (!cliente) {
@@ -1408,7 +1430,7 @@ Deno.serve(async (req) => {
     // ── NOVO: wizard de criação / chat livre — sem pendência correspondente ──
     const chatResult = await handleWhatsAppConversa(
       supabase,
-      cliente as { id: string; escritorio_id: string; nome?: string; email?: string },
+      cliente as { id: string; escritorio_id: string; nome?: string; email?: string; telefone_verificado?: boolean },
       payload.phone,
       conteudo,
       anexoPath,

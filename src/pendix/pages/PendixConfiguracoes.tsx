@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { User, Lock, Palette, CreditCard, Sun, Moon, LogOut, Check, MessageCircle } from 'lucide-react';
 import { useTheme } from '../../app/theme/ThemeProvider';
 import { useAccentColor, ACCENT_COLORS, type AccentColorId } from '../../app/theme/AccentColorProvider';
@@ -22,6 +22,19 @@ export default function PendixConfiguracoes() {
   const [telefone, setTelefone] = useState(user?.telefone ?? '');
   const [savingPerfil, setSavingPerfil] = useState(false);
 
+  // `user` chega de forma assíncrona (o AuthProvider libera a navegação
+  // antes do perfil terminar de carregar) — sem sincronizar aqui, quem entra
+  // direto nessa página logo após o login vê o campo Nome em branco.
+  useEffect(() => {
+    setNome(user?.nome ?? '');
+  }, [user?.nome]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase.from('usuarios').select('telefone').eq('id', user.id).maybeSingle()
+      .then(({ data }) => setTelefone(data?.telefone ?? ''));
+  }, [user?.id]);
+
   const [senhaAtual, setSenhaAtual] = useState('');
   const [novaSenha, setNovaSenha] = useState('');
   const [confirmarSenha, setConfirmarSenha] = useState('');
@@ -36,8 +49,8 @@ export default function PendixConfiguracoes() {
   };
 
   async function handleSalvarPerfil() {
+    if (!user?.id) { toast.error('Sessão inválida — faça login novamente.'); return; }
     if (!nome.trim()) { toast.error('Nome não pode ficar em branco'); return; }
-    if (!user?.id) return;
     setSavingPerfil(true);
     try {
       const { error } = await supabase.from('usuarios').update({ nome, telefone }).eq('id', user.id);
@@ -46,7 +59,7 @@ export default function PendixConfiguracoes() {
       await refreshUser();
       toast.success('Perfil atualizado');
     } catch (e: any) {
-      toast.error(e?.message || 'Erro ao salvar perfil');
+      toast.error(e?.message || 'Erro ao atualizar perfil');
     } finally {
       setSavingPerfil(false);
     }
@@ -56,8 +69,14 @@ export default function PendixConfiguracoes() {
     if (!senhaAtual || !novaSenha || !confirmarSenha) { toast.error('Preencha todos os campos de senha'); return; }
     if (novaSenha.length < 6) { toast.error('A nova senha deve ter pelo menos 6 caracteres'); return; }
     if (novaSenha !== confirmarSenha) { toast.error('As senhas não coincidem'); return; }
+    if (!user?.email) { toast.error('Sessão inválida — faça login novamente.'); return; }
     setSavingSenha(true);
     try {
+      // Supabase não tem um método dedicado de "reautenticar" — confirma a
+      // senha atual fazendo login de novo com ela antes de trocar. Sem isso,
+      // o campo "Senha atual" só dava a impressão de estar sendo validado.
+      const { error: authError } = await supabase.auth.signInWithPassword({ email: user.email, password: senhaAtual });
+      if (authError) { toast.error('Senha atual incorreta.'); return; }
       await updatePassword(novaSenha);
       toast.success('Senha atualizada');
       setSenhaAtual(''); setNovaSenha(''); setConfirmarSenha('');

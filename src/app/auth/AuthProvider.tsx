@@ -150,6 +150,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setLoading(false);
         });
       } else {
+        // Sem sessão válida — mas pode haver token/usuário de uma sessão
+        // anterior expirada ainda salvos no localStorage. Sem limpar isso
+        // aqui, RequirePendixAuth deixa passar com um token morto e o app
+        // fica preso em erros 401 sem nunca voltar pro login.
+        setToken(null);
+        setUser(null);
+        localStorage.removeItem('flash_token');
+        localStorage.removeItem('flash_user');
         setLoading(false);
       }
     }).catch(() => {

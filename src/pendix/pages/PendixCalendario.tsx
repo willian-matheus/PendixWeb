@@ -33,6 +33,11 @@ function addDays(d: Date, n: number) {
   r.setDate(r.getDate() + n);
   return r;
 }
+// Antes não havia nenhum indicador visual de atraso — uma pendência vencida
+// ontem e uma com vencimento daqui a um mês apareciam idênticas.
+function isVencida(p: PendixPendencia, todayKey: string): boolean {
+  return p.status === 'pendente' && !!p.data_limite && p.data_limite.slice(0, 10) < todayKey;
+}
 
 export default function PendixCalendario() {
   const { theme } = useTheme();
@@ -80,6 +85,10 @@ export default function PendixCalendario() {
     return map;
   }, [pendencias]);
 
+  // Pendências sem data_limite não aparecem em nenhuma célula do calendário
+  // — sem essa lista à parte, ficavam completamente invisíveis nesta tela.
+  const semData = useMemo(() => pendencias.filter(p => !p.data_limite), [pendencias]);
+
   const todayKey = toKey(new Date());
 
   function prioOf(p: PendixPendencia): PendixPrioridade {
@@ -114,6 +123,7 @@ export default function PendixCalendario() {
 
   function ItemPendencia({ p }: { p: PendixPendencia }) {
     const prio = prioOf(p);
+    const vencida = isVencida(p, todayKey);
     return (
       <button
         onClick={() => irParaPendencia(p.id)}
@@ -127,6 +137,11 @@ export default function PendixCalendario() {
             <span className="text-xs truncate">{(p.pendix_clientes as any)?.nome ?? '—'}</span>
           </div>
         </div>
+        {vencida && (
+          <span className="text-[9px] font-black uppercase tracking-wide shrink-0 px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-400 border border-red-500/20">
+            Vencida
+          </span>
+        )}
         <span className={`text-[10px] font-bold uppercase tracking-wide shrink-0 ${c.muted}`}>{PRIOR_LABEL[prio]}</span>
       </button>
     );
@@ -206,6 +221,18 @@ export default function PendixCalendario() {
           )}
         </div>
       )}
+
+      {/* Pendências sem data de vencimento — não aparecem em nenhuma célula acima */}
+      {!loading && semData.length > 0 && (
+        <div className={`rounded-2xl border overflow-hidden mt-5 ${c.card}`}>
+          <div className={`flex items-center gap-2 px-4 py-3 border-b ${c.cellB}`}>
+            <CalendarDays size={14} className="text-yellow-400" />
+            <span className="text-sm font-bold">Sem data de vencimento</span>
+            <span className={`text-xs ${c.muted}`}>({semData.length})</span>
+          </div>
+          {semData.map(p => <ItemPendencia key={p.id} p={p} />)}
+        </div>
+      )}
     </div>
   );
 }
@@ -255,7 +282,11 @@ function MonthView({ cursor, byDay, todayKey, c, selectedDay, onSelectDay, prioO
               </span>
               <div className="flex flex-wrap gap-1 mt-1.5">
                 {items.slice(0, 4).map(p => (
-                  <span key={p.id} className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: PRIOR_DOT[prioOf(p)] }} />
+                  <span
+                    key={p.id}
+                    className={`w-1.5 h-1.5 rounded-full ${isVencida(p, todayKey) ? 'ring-2 ring-red-500' : ''}`}
+                    style={{ backgroundColor: PRIOR_DOT[prioOf(p)] }}
+                  />
                 ))}
               </div>
               {items.length > 0 && (
@@ -303,7 +334,10 @@ function WeekView({ cursor, byDay, todayKey, c, onOpen, prioOf }: {
                     onClick={() => onOpen(p.id)}
                     className={`w-full text-left flex items-start gap-1.5 px-3 py-2 border-b last:border-b-0 transition-colors ${c.row}`}
                   >
-                    <span className="w-1.5 h-1.5 rounded-full mt-1 shrink-0" style={{ backgroundColor: PRIOR_DOT[prioOf(p)] }} />
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full mt-1 shrink-0 ${isVencida(p, todayKey) ? 'ring-2 ring-red-500' : ''}`}
+                      style={{ backgroundColor: PRIOR_DOT[prioOf(p)] }}
+                    />
                     <span className="text-[11px] font-semibold leading-tight truncate">{p.nome_documento}</span>
                   </button>
                 ))

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import {
   Search, MessageCircle, CheckCircle2, XCircle, Ban,
@@ -79,11 +79,22 @@ export default function PendixPendencias() {
   const { user } = useAuth();
 
   const [pendencias, setPendencias] = useState<PendixPendencia[]>([]);
+  const [contagemStatus, setContagemStatus] = useState<PendixPendencia[]>([]);
   const [clientes, setClientes] = useState<PendixCliente[]>([]);
   const [empresas, setEmpresas] = useState<PendixEmpresa[]>([]);
   const [loading, setLoading] = useState(true);
+  const requestIdRef = useRef(0);
 
   const [search, setSearch] = useState(searchParams.get('busca') ?? '');
+  // Busca não é debatida a cada tecla — sem isso, cada tecla dispara uma
+  // requisição nova e uma resposta mais lenta de um termo antigo podia
+  // sobrescrever o resultado (já mais recente) de um termo mais novo.
+  const [debouncedSearch, setDebouncedSearch] = useState(search);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
   const [filterStatus, setFilterStatus] = useState('');
   const [filterCliente, setFilterCliente] = useState('');
   const [filterEmpresa, setFilterEmpresa] = useState('');
@@ -93,6 +104,7 @@ export default function PendixPendencias() {
 
   const [atualizando, setAtualizando] = useState<string | null>(null);
   const [excluindo, setExcluindo] = useState<PendixPendencia | null>(null);
+  const [deletando, setDeletando] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editandoId, setEditandoId] = useState<string | null>(null);
@@ -113,27 +125,38 @@ export default function PendixPendencias() {
   };
 
   const load = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     try {
-      const [p, cl, emp] = await Promise.all([
+      const [p, contagem, cl, emp] = await Promise.all([
         getPendixPendencias({
           clienteId: filterCliente || undefined,
           status: filterStatus || undefined,
           competencia: filterCompetencia || undefined,
-          search: search || undefined,
+          search: debouncedSearch || undefined,
+        }),
+        // Contagem dos chips de status ignora o filtro de status (mas
+        // respeita os outros) — senão, ao clicar num chip, os outros chips
+        // passavam a mostrar "· 0" mesmo havendo pendências reais neles.
+        getPendixPendencias({
+          clienteId: filterCliente || undefined,
+          competencia: filterCompetencia || undefined,
+          search: debouncedSearch || undefined,
         }),
         clientes.length ? Promise.resolve(clientes) : getPendixClientes(),
         empresas.length ? Promise.resolve(empresas) : getPendixEmpresas(),
       ]);
+      if (requestId !== requestIdRef.current) return; // resposta desatualizada — ignora
       setPendencias(p);
+      setContagemStatus(contagem);
       if (!clientes.length) setClientes(cl);
       if (!empresas.length) setEmpresas(emp);
     } catch {
-      toast.error('Erro ao carregar pendências');
+      if (requestId === requestIdRef.current) toast.error('Erro ao carregar pendências');
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [filterCliente, filterStatus, filterCompetencia, search]);
+  }, [filterCliente, filterStatus, filterCompetencia, debouncedSearch]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -177,13 +200,15 @@ export default function PendixPendencias() {
   }
 
   async function handleDelete() {
-    if (!excluindo) return;
+    if (!excluindo || deletando) return;
+    setDeletando(true);
     try {
       await deletePendixPendencia(excluindo.id);
       setPendencias(prev => prev.filter(p => p.id !== excluindo.id));
       toast.success('Pendência removida');
+      setExcluindo(null);
     } catch { toast.error('Erro ao remover'); }
-    finally { setExcluindo(null); }
+    finally { setDeletando(false); }
   }
 
   function cobrarWhatsApp(p: PendixPendencia) {
@@ -271,6 +296,7 @@ export default function PendixPendencias() {
 
       if (editandoId) {
         const updated = await updatePendixPendenciaCampos(editandoId, {
+          cliente_id: form.clienteId || undefined,
           nome_documento: form.titulo,
           competencia: form.competencia,
           data_limite: form.dataVencimento || undefined,
@@ -284,7 +310,7 @@ export default function PendixPendencias() {
           .filter(cl => (cl as any).empresa_id === form.empresaId)
           .map(cl => cl.id);
         if (!idsClientes.length) { toast.error('Nenhum cliente vinculado a essa empresa'); setSalvando(false); return; }
-        const criadas: PendixPendencia[] = [];
+        let criadas = 0;
         for (const clienteId of idsClientes) {
           const nova = await postPendixPendencia({
             escritorio_id: '', cliente_id: clienteId, nome_documento: form.titulo,
@@ -292,10 +318,15 @@ export default function PendixPendencias() {
             data_limite: form.dataVencimento || undefined, observacoes: form.observacaoInterna || undefined,
             ...camposReais,
           } as any);
-          criadas.push(nova);
+          savePendenciaExtra(nova.id, extraLocal);
+          // Atualiza o state a cada pendência criada, não só no final — se
+          // uma falhar no meio do lote, as que já deram certo continuam
+          // visíveis (senão o usuário via erro genérico e reenviava tudo,
+          // duplicando as que já tinham sido criadas com sucesso).
+          setPendencias(prev => [nova, ...prev]);
+          criadas++;
         }
-        setPendencias(prev => [...criadas, ...prev]);
-        toast.success(`${criadas.length} pendências criadas para os clientes da empresa`);
+        toast.success(`${criadas} pendências criadas para os clientes da empresa`);
       } else {
         const nova = await postPendixPendencia({
           escritorio_id: '', cliente_id: form.clienteId, nome_documento: form.titulo,
@@ -315,11 +346,11 @@ export default function PendixPendencias() {
   }
 
   const counts = {
-    pendente: pendencias.filter(p => p.status === 'pendente').length,
-    em_analise: pendencias.filter(p => p.status === 'em_analise').length,
-    recebido: pendencias.filter(p => p.status === 'recebido').length,
-    rejeitado: pendencias.filter(p => p.status === 'rejeitado').length,
-    cancelado: pendencias.filter(p => p.status === 'cancelado').length,
+    pendente: contagemStatus.filter(p => p.status === 'pendente').length,
+    em_analise: contagemStatus.filter(p => p.status === 'em_analise').length,
+    recebido: contagemStatus.filter(p => p.status === 'recebido').length,
+    rejeitado: contagemStatus.filter(p => p.status === 'rejeitado').length,
+    cancelado: contagemStatus.filter(p => p.status === 'cancelado').length,
   };
 
   return (
@@ -694,7 +725,7 @@ export default function PendixPendencias() {
         </div>
       )}
 
-      <AlertDialog open={!!excluindo} onOpenChange={() => setExcluindo(null)}>
+      <AlertDialog open={!!excluindo} onOpenChange={(open) => !open && !deletando && setExcluindo(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Remover pendência</AlertDialogTitle>
@@ -703,8 +734,10 @@ export default function PendixPendencias() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700">Remover</AlertDialogAction>
+            <AlertDialogCancel disabled={deletando}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} disabled={deletando} className="bg-red-600 hover:bg-red-700">
+              {deletando ? 'Removendo...' : 'Remover'}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
