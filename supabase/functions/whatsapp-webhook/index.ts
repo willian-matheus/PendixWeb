@@ -278,7 +278,7 @@ async function registrarTentativaEResponder(
     }, { onConflict: 'telefone_digits' });
 
   const mensagem = tentativas >= 3
-    ? `${mensagemBase}\n\nSe continuar com dificuldade, fale diretamente com seu escritório de contabilidade.`
+    ? `${mensagemBase}\n\nSe continuar com dificuldade, é só me avisar que a gente resolve por aqui mesmo.`
     : mensagemBase;
 
   await enviarRespostaWhatsApp(telefoneRaw, mensagem);
@@ -327,7 +327,7 @@ async function handleIdentificacaoFlow(
 
     await registrarTentativaEResponder(
       supabase, telefoneDigits, telefoneRaw,
-      'Não encontramos esse e-mail no nosso cadastro 🙏 Pode conferir e tentar novamente? Se preferir, é só falar com seu escritório de contabilidade.',
+      'Não encontramos esse e-mail no nosso cadastro 🙏 Pode conferir e tentar novamente?',
     );
     return;
   }
@@ -361,7 +361,7 @@ async function escolherPendenciaComClaude(
         messages: [{
           role: 'user',
           content:
-            `Um cliente de escritório contábil respondeu no WhatsApp: "${texto}"\n\n` +
+            `Um cliente respondeu no WhatsApp: "${texto}"\n\n` +
             `Pendências em aberto desse cliente:\n` +
             candidatas.map(c => `- id=${c.id} | ${c.nome_documento} (competência ${c.competencia})`).join('\n') +
             `\n\nQual pendência essa mensagem responde? Só escolha se tiver confiança razoável.`,
@@ -434,7 +434,7 @@ async function validarDocumentoComClaude(
             conteudoArquivo,
             {
               type: 'text',
-              text: `Um cliente de escritório contábil enviou este arquivo como o documento "${nomeDocumento}" ` +
+              text: `Um cliente enviou este arquivo como o documento "${nomeDocumento}" ` +
                 `referente à competência ${competencia}. Analise o conteúdo do arquivo e diga se ele realmente ` +
                 `parece ser esse documento — não está em branco, corrompido, ilegível, ou é claramente outro tipo ` +
                 `de documento/assunto sem relação.`,
@@ -622,7 +622,7 @@ async function carregarHistoricoChat(
 // ══════════════════════════════════════════════════════════════════════════
 
 function buildChatLivrePrompt(nomeCliente: string): string {
-  return `Você é o assistente virtual do escritório contábil no sistema Pendix, conversando com ${nomeCliente} pelo WhatsApp.
+  return `Você é o assistente virtual do Pendix, conversando com ${nomeCliente} pelo WhatsApp.
 Responda de forma breve, profissional e amigável (1 a 3 frases).
 Se o cliente perguntar sobre enviar um documento ou tiver uma pendência, avise que ele pode dizer algo como "quero criar uma pendência" ou "preciso enviar um documento" para você iniciar o cadastro guiado.
 Não invente informações sobre pendências específicas do cliente — você não tem acesso a esses dados aqui.
@@ -677,6 +677,90 @@ async function responderChatLivre(
     console.error('whatsapp-webhook: falha no chat livre', String(err));
     return 'Desculpe, tive um problema técnico. Pode tentar de novo?';
   }
+}
+
+// ── Resposta dinâmica quando já existe pendência aberta (sem anexo) ────────
+//
+// Antes disso era um texto fixo, sempre idêntico, ignorando o que o cliente
+// escreveu (ex: uma dúvida como "pode ser em foto?" recebia de volta o mesmo
+// aviso genérico de novo). Agora usa Claude, com o histórico recente da
+// conversa daquela pendência, pra responder de verdade ao que foi dito —
+// mantendo o mesmo papel de avisar que ainda aguardamos o envio quando fizer
+// sentido, mas sem soar repetitivo/surdo. Nunca muda status da pendência
+// nem promete isso — quem decide isso é o fluxo de validação de anexo.
+function buildRespostaPendenciaPrompt(nomeDocumento: string, competencia: string, dataLimite: string | null): string {
+  return `Você é o assistente virtual do Pendix, conversando por WhatsApp com um cliente que tem uma pendência em aberto.
+
+Documento pendente: "${nomeDocumento}" — competência ${competencia}${dataLimite ? `, vencimento ${dataLimite}` : ''}.
+O cliente ainda não enviou o arquivo (a mensagem dele agora é texto, sem anexo).
+Aceitamos o arquivo em foto ou PDF, enviado diretamente aqui pelo WhatsApp.
+
+Responda à mensagem do cliente de forma direta e útil (1 a 3 frases) — pode ser uma dúvida sobre formato, prazo, como enviar, ou qualquer outro comentário relacionado à pendência. Se a mensagem não for uma pergunta, apenas confirme que seguimos no aguardo do envio.
+Não invente prazos, valores ou informações que você não tem sobre esse cliente. Não prometa mudar o status da pendência — isso é automático quando o arquivo chega.
+
+Regras de atendimento (gentileza e cordialidade):
+- Tom sempre gentil, prestativo e profissional; nunca grosseiro, ríspido ou frio/automático.
+- Mensagens curtas, claras e objetivas — sem textos longos desnecessários.
+- Emojis com moderação, só quando deixam a mensagem mais amigável.
+- Evite repetir literalmente a mesma frase de respostas anteriores no histórico — varie a forma de dizer.`;
+}
+
+async function responderPerguntaSobrePendencia(
+  nomeDocumento: string,
+  competencia: string,
+  dataLimite: string | null,
+  historico: { role: 'user' | 'assistant'; content: string }[],
+  mensagemAtual: string,
+): Promise<string> {
+  const fallback = `Certo! Ficamos no aguardo do envio de *${nomeDocumento}* — pode mandar por aqui mesmo, em foto ou PDF, assim que puder. Tenha um ótimo dia! 😊`;
+
+  const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
+  if (!apiKey) return fallback;
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-5',
+        max_tokens: 220,
+        system: buildRespostaPendenciaPrompt(nomeDocumento, competencia, dataLimite),
+        messages: [...historico, { role: 'user' as const, content: mensagemAtual }],
+      }),
+    });
+
+    const data = await resp.json();
+    const texto = data.content
+      ?.filter((b: any) => b.type === 'text')
+      .map((b: any) => b.text)
+      .join('\n');
+
+    return texto || fallback;
+  } catch (err) {
+    console.error('whatsapp-webhook: falha ao responder pergunta sobre pendência', String(err));
+    return fallback;
+  }
+}
+
+async function carregarHistoricoConversa(
+  supabase: ReturnType<typeof createClient>,
+  conversaId: string,
+): Promise<{ role: 'user' | 'assistant'; content: string }[]> {
+  const { data: msgs } = await supabase
+    .from('pendix_mensagens')
+    .select('remetente, conteudo')
+    .eq('conversa_id', conversaId)
+    .order('criada_em', { ascending: true })
+    .limit(MAX_HISTORICO);
+
+  return (msgs ?? []).map((m: any) => ({
+    role: m.remetente === 'cliente' ? 'user' as const : 'assistant' as const,
+    content: m.conteudo || '[arquivo enviado]',
+  }));
 }
 
 function pareceQuerCriarPendencia(texto: string): boolean {
@@ -866,7 +950,7 @@ function mensagemDoPasso(
       };
     case 'observacao_interna':
       return {
-        texto: 'Por último, quer adicionar uma *observação interna* (só a equipe do escritório vê, não o cliente)? Pode escrever, ou tocar em Pular.',
+        texto: 'Por último, quer adicionar uma *observação interna* (só a nossa equipe vê, não fica visível pra você)? Pode escrever, ou tocar em Pular.',
         botoes: [{ id: 'pular', label: 'Pular' }],
       };
     case 'confirmacao':
@@ -1151,7 +1235,7 @@ async function handleWhatsAppConversa(
   // sem nunca ter passado por essa confirmação, não pode criar pendência nova.
   if (conteudo.texto && pareceQuerCriarPendencia(conteudo.texto)) {
     if (!cliente.telefone_verificado) {
-      const msg = 'No momento não é possível criar uma pendência por aqui — seu contato ainda não está confirmado no Pendix. Fale com seu escritório de contabilidade se precisar de ajuda com isso. 🙏';
+      const msg = 'No momento não é possível criar uma pendência por aqui — seu contato ainda não está confirmado no Pendix. Assim que confirmarmos seu número, você já vai poder criar por aqui. 🙏';
       await supabase.from('pendix_chat_mensagens').insert({ session_id: sessionId, remetente: 'ia', conteudo: msg });
       await enviarRespostaWhatsApp(telefone, msg);
       return { ok: true };
@@ -1236,6 +1320,19 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ignored: true, reason: 'fromMe' }), { status: 200 });
     }
 
+    // Mensagens de GRUPO do WhatsApp não são de um cliente individual — a
+    // Z-API manda o telefone como um JID de grupo (ex: "1203...-group"), que
+    // nunca bate com nenhum pendix_clientes.telefone. Sem esse filtro, toda
+    // mensagem postada em qualquer grupo que o número do Pendix participa
+    // caía no fluxo de "número não cadastrado" e o bot respondia pro grupo
+    // inteiro a cada mensagem — chegou a mais de mil respostas repetidas
+    // para um único grupo em produção antes desse fix.
+    const ehMensagemDeGrupo = payload.isGroup === true
+      || (typeof payload.phone === 'string' && payload.phone.includes('-group'));
+    if (ehMensagemDeGrupo) {
+      return new Response(JSON.stringify({ ignored: true, reason: 'group message' }), { status: 200 });
+    }
+
     // Z-API reentrega o mesmo webhook às vezes (at-least-once delivery).
     // Sem essa trava, o wizard processa a mesma mensagem do cliente duas
     // vezes e o passo avança sozinho, desalinhando a próxima resposta real.
@@ -1306,7 +1403,7 @@ Deno.serve(async (req) => {
     // ── Buscar pendências abertas (fluxo original) ─────────────────────
     const { data: candidatas } = await supabase
       .from('pendix_pendencias')
-      .select('id, nome_documento, competencia')
+      .select('id, nome_documento, competencia, data_limite')
       .eq('cliente_id', cliente.id)
       .in('status', PENDENCIA_STATUS_ABERTA);
 
@@ -1406,9 +1503,21 @@ Deno.serve(async (req) => {
       } else {
         // Sem anexo: nenhum documento foi de fato enviado, então a pendência
         // continua 'pendente' (não vira 'em_analise' — isso é só pra quando
-        // chega um arquivo de verdade) e a resposta deixa claro que ainda
-        // estamos aguardando o envio, em vez de dar a entender que algo já
-        // foi recebido para análise.
+        // chega um arquivo de verdade). A resposta é gerada pela IA com o
+        // histórico da conversa, pra responder de verdade ao que o cliente
+        // disse (dúvida sobre formato/prazo etc.) em vez de repetir sempre o
+        // mesmo aviso genérico, mas sem prometer nada sobre status.
+        const textoParaResposta = conteudo.texto
+          ?? (botaoId ? `[clicou: ${botaoId}]` : 'Enviou uma mensagem sem texto reconhecido.');
+        const historicoConversa = await carregarHistoricoConversa(supabase, conversaId);
+        const respostaDinamica = await responderPerguntaSobrePendencia(
+          nomeDocumento,
+          pendenciaMatch?.competencia ?? '',
+          (pendenciaMatch as any)?.data_limite ?? null,
+          historicoConversa,
+          textoParaResposta,
+        );
+
         await supabase.from('pendix_historico').insert({
           escritorio_id: cliente.escritorio_id,
           cliente_id: cliente.id,
@@ -1418,10 +1527,14 @@ Deno.serve(async (req) => {
           usuario_nome: 'WhatsApp (automático)',
         });
 
-        await enviarRespostaWhatsApp(
-          payload.phone,
-          `Certo! Ficamos no aguardo do envio de *${nomeDocumento}* — pode mandar por aqui mesmo, em foto ou PDF, assim que puder. Tenha um ótimo dia! 😊`,
-        );
+        await enviarRespostaWhatsApp(payload.phone, respostaDinamica);
+
+        await supabase.from('pendix_mensagens').insert({
+          conversa_id: conversaId,
+          remetente: 'agente',
+          tipo: 'texto',
+          conteudo: respostaDinamica,
+        });
       }
 
       return new Response(JSON.stringify({ ok: true, pendencia_id: pendenciaId, anexo: anexoPath }), { status: 200 });
