@@ -3,6 +3,7 @@ import { User, Lock, Palette, CreditCard, Sun, Moon, LogOut, Check, MessageCircl
 import { useTheme } from '../../app/theme/ThemeProvider';
 import { useAccentColor, ACCENT_COLORS, type AccentColorId } from '../../app/theme/AccentColorProvider';
 import { useAuth } from '../../app/auth/AuthProvider';
+import { supabase } from '../../app/services/supabase';
 import { toast } from 'sonner';
 
 const CORES = (Object.keys(ACCENT_COLORS) as AccentColorId[]).map(id => ({ id, ...ACCENT_COLORS[id] }));
@@ -13,12 +14,12 @@ const WHATSAPP_PENDIX_NUMERO = '47991964449';
 export default function PendixConfiguracoes() {
   const { theme, toggleTheme } = useTheme();
   const { accent, setAccent } = useAccentColor();
-  const { user, signOut, updatePassword } = useAuth();
+  const { user, signOut, updatePassword, refreshUser } = useAuth();
   const isDark = theme === 'dark';
 
   const [nome, setNome] = useState(user?.nome ?? '');
   const [email] = useState(user?.email ?? '');
-  const [telefone, setTelefone] = useState('');
+  const [telefone, setTelefone] = useState(user?.telefone ?? '');
   const [savingPerfil, setSavingPerfil] = useState(false);
 
   const [senhaAtual, setSenhaAtual] = useState('');
@@ -34,12 +35,21 @@ export default function PendixConfiguracoes() {
     label: isDark ? 'text-gray-400' : 'text-gray-600',
   };
 
-  function handleSalvarPerfil() {
+  async function handleSalvarPerfil() {
+    if (!nome.trim()) { toast.error('Nome não pode ficar em branco'); return; }
+    if (!user?.id) return;
     setSavingPerfil(true);
-    setTimeout(() => {
+    try {
+      const { error } = await supabase.from('usuarios').update({ nome, telefone }).eq('id', user.id);
+      if (error) throw error;
+      await supabase.auth.updateUser({ data: { nome, telefone } });
+      await refreshUser();
       toast.success('Perfil atualizado');
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao salvar perfil');
+    } finally {
       setSavingPerfil(false);
-    }, 400);
+    }
   }
 
   async function handleSalvarSenha() {

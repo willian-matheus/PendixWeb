@@ -9,7 +9,7 @@ import {
   type PendixCliente, type PendixDocConfig, type PendixRegime, type PendixClienteStatus, type PendixClienteTipo, type PendixPrioridade, type PendixFrequencia,
 } from '../services/pendix';
 import {
-  getPendixEmpresas, getEmpresaIdDoCliente, setEmpresaDoCliente, getClienteEmpresaLinks, type PendixEmpresa,
+  getPendixEmpresas, type PendixEmpresa,
 } from '../services/empresas';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -52,7 +52,7 @@ const STATUS_BADGE: Record<PendixClienteStatus, string> = {
 
 const EMPTY_CLIENTE: Omit<PendixCliente, 'id' | 'created_at' | 'updated_at'> = {
   escritorio_id: '', nome: '', responsavel: '', telefone: '', email: '',
-  regime: 'simples_nacional', status: 'ativo', observacoes: '', tipo: 'pessoa',
+  regime: 'simples_nacional', status: 'ativo', observacoes: '', tipo: 'pessoa', empresa_id: null,
 };
 const EMPTY_DOC: Omit<PendixDocConfig, 'id' | 'created_at' | 'escritorio_id'> = {
   cliente_id: '', nome: '', frequencia: 'mensal', dia_limite: 10, prioridade: 'media', ativo: true,
@@ -65,7 +65,6 @@ export default function PendixClientes() {
 
   const [clientes, setClientes] = useState<PendixCliente[]>([]);
   const [empresas, setEmpresas] = useState<PendixEmpresa[]>([]);
-  const [links, setLinks] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -105,7 +104,6 @@ export default function PendixClientes() {
       const [cl, emp] = await Promise.all([getPendixClientes(), getPendixEmpresas()]);
       setClientes(cl);
       setEmpresas(emp);
-      setLinks(getClienteEmpresaLinks());
     }
     catch { toast.error('Erro ao carregar clientes'); }
     finally { setLoading(false); }
@@ -125,7 +123,7 @@ export default function PendixClientes() {
   }
 
   function openModal(cliente?: PendixCliente) {
-    if (cliente) { setEditando(cliente); setForm({ ...cliente }); setFormEmpresaId(getEmpresaIdDoCliente(cliente.id) || ''); }
+    if (cliente) { setEditando(cliente); setForm({ ...cliente }); setFormEmpresaId(cliente.empresa_id || ''); }
     else { setEditando(null); setForm({ ...EMPTY_CLIENTE, escritorio_id: (user as any)?.officeId || '' }); setFormEmpresaId(''); }
     setModalOpen(true);
   }
@@ -134,20 +132,16 @@ export default function PendixClientes() {
     if (!form.nome.trim()) { toast.error('Nome é obrigatório'); return; }
     setSaving(true);
     try {
-      let clienteId: string;
+      const formData = { ...form, empresa_id: formEmpresaId || null };
       if (editando) {
-        const updated = await updatePendixCliente(editando.id, form);
+        const updated = await updatePendixCliente(editando.id, formData);
         setClientes(prev => prev.map(c => c.id === editando.id ? updated : c));
-        clienteId = editando.id;
         toast.success('Cliente atualizado');
       } else {
-        const novo = await postPendixCliente(form);
+        const novo = await postPendixCliente(formData);
         setClientes(prev => [...prev, novo]);
-        clienteId = novo.id;
         toast.success('Cliente cadastrado');
       }
-      setEmpresaDoCliente(clienteId, formEmpresaId || null);
-      setLinks(getClienteEmpresaLinks());
       setModalOpen(false);
     } catch (e: any) {
       toast.error(e?.message || 'Erro ao salvar');
@@ -160,7 +154,6 @@ export default function PendixClientes() {
     if (!excluindo) return;
     try {
       await deletePendixCliente(excluindo.id);
-      setEmpresaDoCliente(excluindo.id, null);
       setClientes(prev => prev.filter(c => c.id !== excluindo.id));
       toast.success('Cliente removido');
     } catch { toast.error('Erro ao remover cliente'); }
@@ -542,9 +535,9 @@ export default function PendixClientes() {
               <div className="flex items-center gap-2 text-sm">
                 <Mail size={13} className={c.muted} /> {visualizando.email || '—'}
               </div>
-              <div className="flex items-center gap-2 text-sm">
+                <div className="flex items-center gap-2 text-sm">
                 <Building2 size={13} className={c.muted} />
-                {empresas.find(em => em.id === links[visualizando.id])?.nome || 'Nenhuma empresa vinculada'}
+                {empresas.find(em => em.id === visualizando.empresa_id)?.nome || 'Nenhuma empresa vinculada'}
               </div>
               {visualizando.observacoes && (
                 <div>

@@ -5,6 +5,7 @@ import { lazy, Suspense } from "react";
 const PendixLogin = lazy(() => import("../pendix/pages/PendixLogin"));
 const PendixRegistro = lazy(() => import("../pendix/pages/PendixRegistro"));
 const PendixEsqueciSenha = lazy(() => import("../pendix/pages/PendixEsqueciSenha"));
+const PendixRedefinirSenha = lazy(() => import("../pendix/pages/PendixRedefinirSenha"));
 const PendixRoot = lazy(() => import("../pendix/pages/PendixRoot"));
 const PendixDashboard = lazy(() => import("../pendix/pages/PendixDashboard"));
 const PendixClientes = lazy(() => import("../pendix/pages/PendixClientes"));
@@ -93,6 +94,15 @@ export const router = createBrowserRouter([
     element: (
       <Suspense fallback={<PageLoader />}>
         <PendixEsqueciSenha />
+      </Suspense>
+    ),
+  },
+  {
+    path: "/redefinir-senha",
+    errorElement: <RouteErrorBoundary />,
+    element: (
+      <Suspense fallback={<PageLoader />}>
+        <PendixRedefinirSenha />
       </Suspense>
     ),
   },

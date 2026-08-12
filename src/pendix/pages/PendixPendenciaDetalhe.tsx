@@ -8,11 +8,10 @@ import {
 import { useTheme } from '../../app/theme/ThemeProvider';
 import { toast } from 'sonner';
 import {
-  getPendixPendenciaPorId, updatePendixPendenciaStatus, addPendixHistorico, getPendenciaExtra,
-  getPendixAnexoUrl,
-  type PendixPendencia, type PendixPendenciaStatus,
+  getPendixPendenciaPorId, updatePendixPendenciaStatus, addPendixHistorico,
+  getPendixAnexoUrl, getPendixHistorico,
+  type PendixPendencia, type PendixPendenciaStatus, type PendixHistoricoEntry,
 } from '../services/pendix';
-import { getPendixEmpresas, type PendixEmpresa } from '../services/empresas';
 
 const STATUS_CONFIG: Record<PendixPendenciaStatus, { label: string; color: string; icon: React.ComponentType<any> }> = {
   pendente:   { label: 'Pendente',   color: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/20',    icon: Clock },
@@ -37,7 +36,7 @@ export default function PendixPendenciaDetalhe() {
   const isDark = theme === 'dark';
 
   const [pendencia, setPendencia] = useState<PendixPendencia | null>(null);
-  const [empresa, setEmpresa] = useState<PendixEmpresa | null>(null);
+  const [historico, setHistorico] = useState<PendixHistoricoEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [atualizando, setAtualizando] = useState(false);
 
@@ -53,15 +52,12 @@ export default function PendixPendenciaDetalhe() {
     if (!id) return;
     setLoading(true);
     try {
-      const p = await getPendixPendenciaPorId(id);
+      const [p, hist] = await Promise.all([
+        getPendixPendenciaPorId(id),
+        getPendixHistorico({ pendenciaId: id, limit: 10 }),
+      ]);
       setPendencia(p);
-      const extra = getPendenciaExtra(id);
-      if (extra.empresa_id) {
-        const empresas = await getPendixEmpresas();
-        setEmpresa(empresas.find(e => e.id === extra.empresa_id) ?? null);
-      } else {
-        setEmpresa(null);
-      }
+      setHistorico(hist);
     } catch {
       toast.error('Pendência não encontrada');
     } finally {
@@ -93,7 +89,7 @@ export default function PendixPendenciaDetalhe() {
     );
   }
 
-  const extra = getPendenciaExtra(pendencia.id);
+  const empresa = (pendencia.pendix_clientes as any)?.pendix_empresas ?? null;
   const cfg = STATUS_CONFIG[pendencia.status];
   const StatusIcon = cfg.icon;
   const cliente = pendencia.pendix_clientes as any;
@@ -179,7 +175,7 @@ export default function PendixPendenciaDetalhe() {
             <MessageCircle size={14} /> Cobrar
           </button>
           <button
-            onClick={() => navigate('/pendix/app/pendencias')}
+            onClick={() => navigate(`/pendix/app/pendencias?editId=${pendencia.id}`)}
             className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 text-white text-sm font-bold px-4 py-2.5 rounded-xl transition-colors"
           >
             <PenSquare size={14} /> Editar
@@ -236,6 +232,28 @@ export default function PendixPendenciaDetalhe() {
               })}
             </div>
           </div>
+
+          {/* Histórico da pendência */}
+          {historico.length > 0 && (
+            <div className={`rounded-2xl border p-5 ${c.card}`}>
+              <p className={`text-xs font-bold uppercase tracking-widest mb-4 ${c.label}`}>Histórico de atividades</p>
+              <div className="space-y-3">
+                {historico.map(h => (
+                  <div key={h.id} className={`flex items-start gap-3 pb-3 border-b last:border-b-0 last:pb-0 ${isDark ? 'border-white/5' : 'border-gray-100'}`}>
+                    <div className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${isDark ? 'bg-purple-500' : 'bg-purple-500'}`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold">{h.acao}</p>
+                      {h.descricao && <p className={`text-[11px] mt-0.5 ${c.muted}`}>{h.descricao}</p>}
+                      <p className={`text-[10px] mt-1 ${c.muted}`}>
+                        {h.usuario_nome && <span>{h.usuario_nome} · </span>}
+                        {new Date(h.created_at).toLocaleString('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="space-y-5">

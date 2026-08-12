@@ -38,7 +38,11 @@ export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   };
 
   async function loadNotifs() {
-    setNotifs(await getPendixNotificacoes());
+    try {
+      setNotifs(await getPendixNotificacoes());
+    } catch {
+      // silently ignore — notificações não podem quebrar o layout
+    }
   }
 
   useEffect(() => { loadNotifs(); }, []);

@@ -1,0 +1,1 @@
+import{j as n}from"./index-Dh_KwM5h.js";function r({children:t,className:e}){return n.jsx("p",{className:e,style:{fontFamily:"Poppins",fontWeight:500,letterSpacing:"10px",textTransform:"uppercase"},children:t})}export{r as P};

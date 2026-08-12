@@ -12,7 +12,7 @@ import { useTheme } from '../../app/theme/ThemeProvider';
 import { toast } from 'sonner';
 import {
   getPendixStats, getPendixPendencias, getPendixClientes, getPendixHistorico,
-  gerarPendenciasMes,
+  gerarPendenciasMes, getPendixPendenciasPorMes,
   type PendixPendencia, type PendixCliente, type PendixHistoricoEntry,
 } from '../services/pendix';
 
@@ -39,13 +39,6 @@ function mesAtual() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-function ultimosMesesFake() {
-  // Volume histórico ilustrativo — só há dados reais para a competência atual.
-  const nomes = ['Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago'];
-  const base = [18, 24, 21, 30, 27, 33];
-  return nomes.map((mes, i) => ({ mes, pendencias: base[i] }));
-}
-
 export default function PendixDashboard() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
@@ -54,6 +47,7 @@ export default function PendixDashboard() {
   const [pendencias, setPendencias] = useState<PendixPendencia[]>([]);
   const [clientes, setClientes] = useState<PendixCliente[]>([]);
   const [atividades, setAtividades] = useState<PendixHistoricoEntry[]>([]);
+  const [mesesData, setMesesData] = useState<{ mes: string; pendencias: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [gerandoId, setGerandoId] = useState<string | null>(null);
   const competencia = mesAtual();
@@ -70,16 +64,18 @@ export default function PendixDashboard() {
   async function load() {
     setLoading(true);
     try {
-      const [s, p, cl, hist] = await Promise.all([
+      const [s, p, cl, hist, meses] = await Promise.all([
         getPendixStats(),
         getPendixPendencias({ competencia }),
         getPendixClientes(),
         getPendixHistorico(),
+        getPendixPendenciasPorMes(6),
       ]);
       setStats(s);
       setPendencias(p);
       setClientes(cl);
       setAtividades(hist.slice(0, 6));
+      setMesesData(meses);
     } catch {
       toast.error('Erro ao carregar dados do Pendix');
     } finally {
@@ -131,7 +127,7 @@ export default function PendixDashboard() {
     return Object.entries(counts).map(([k, value]) => ({ name: PRIORIDADE_LABEL[k], value, color: PRIORIDADE_HEX[k] }));
   }, [pendencias]);
 
-  const porMesData = useMemo(() => ultimosMesesFake(), []);
+  const porMesData = mesesData;
 
   const proximasCobrancas = pendencias
     .filter(p => p.data_limite && (p.status === 'pendente' || p.status === 'em_analise'))
@@ -140,6 +136,12 @@ export default function PendixDashboard() {
 
   const axisColor = isDark ? '#6b7280' : '#9ca3af';
   const gridColor = isDark ? 'rgba(255,255,255,0.06)' : '#e5e7eb';
+  const tooltipTextColor = isDark ? '#e5e7eb' : '#111827';
+  const tooltipStyle = {
+    contentStyle: { background: isDark ? '#18181b' : '#fff', border: `1px solid ${gridColor}`, borderRadius: 12, fontSize: 12 },
+    labelStyle: { color: tooltipTextColor },
+    itemStyle: { color: tooltipTextColor },
+  };
 
   return (
     <div className={c.page}>
@@ -192,7 +194,7 @@ export default function PendixDashboard() {
               <Pie data={porStatusData} dataKey="value" nameKey="name" innerRadius={45} outerRadius={70} paddingAngle={2}>
                 {porStatusData.map((entry, i) => <Cell key={i} fill={entry.color} stroke="none" />)}
               </Pie>
-              <Tooltip contentStyle={{ background: isDark ? '#18181b' : '#fff', border: `1px solid ${gridColor}`, borderRadius: 12, fontSize: 12 }} />
+              <Tooltip {...tooltipStyle} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
             </PieChart>
           </ResponsiveContainer>
@@ -205,7 +207,7 @@ export default function PendixDashboard() {
               <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
               <XAxis dataKey="name" tick={{ fontSize: 11, fill: axisColor }} axisLine={{ stroke: gridColor }} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: axisColor }} axisLine={false} tickLine={false} allowDecimals={false} />
-              <Tooltip contentStyle={{ background: isDark ? '#18181b' : '#fff', border: `1px solid ${gridColor}`, borderRadius: 12, fontSize: 12 }} cursor={{ fill: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)' }} />
+              <Tooltip {...tooltipStyle} cursor={{ fill: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)' }} />
               <Bar dataKey="value" radius={[6, 6, 0, 0]}>
                 {porPrioridadeData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
               </Bar>
@@ -220,7 +222,7 @@ export default function PendixDashboard() {
               <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
               <XAxis dataKey="mes" tick={{ fontSize: 11, fill: axisColor }} axisLine={{ stroke: gridColor }} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: axisColor }} axisLine={false} tickLine={false} allowDecimals={false} />
-              <Tooltip contentStyle={{ background: isDark ? '#18181b' : '#fff', border: `1px solid ${gridColor}`, borderRadius: 12, fontSize: 12 }} cursor={{ fill: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)' }} />
+              <Tooltip {...tooltipStyle} cursor={{ fill: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)' }} />
               <Bar dataKey="pendencias" fill="#8b5cf6" radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>

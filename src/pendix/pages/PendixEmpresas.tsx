@@ -21,7 +21,7 @@ const STATUS_BADGE: Record<PendixEmpresaStatus, string> = {
 };
 
 const EMPTY: Omit<PendixEmpresa, 'id' | 'created_at' | 'updated_at'> = {
-  nome: '', telefone: '', email: '', observacoes: '', status: 'ativa',
+  escritorio_id: '', nome: '', telefone: '', email: '', observacoes: '', status: 'ativa',
 };
 
 export default function PendixEmpresas() {

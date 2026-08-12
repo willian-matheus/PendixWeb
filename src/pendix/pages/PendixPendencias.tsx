@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import {
   Search, MessageCircle, CheckCircle2, XCircle, Ban,
@@ -9,11 +9,12 @@ import { toast } from 'sonner';
 import {
   getPendixPendencias, updatePendixPendenciaStatus, updatePendixPendenciaCampos, deletePendixPendencia,
   getPendixClientes, postPendixPendencia, addPendixHistorico,
-  getPendenciaExtra, savePendenciaExtra,
   type PendixPendencia, type PendixPendenciaStatus, type PendixCliente,
   type PendixPendenciaTipo, type PendixPrioridade,
 } from '../services/pendix';
-import { getPendixEmpresas, getClienteEmpresaLinks, getClientesIdsDaEmpresa, type PendixEmpresa } from '../services/empresas';
+import { getPendixEmpresas, type PendixEmpresa } from '../services/empresas';
+import { supabase } from '../../app/services/supabase';
+import { useAuth } from '../../app/auth/AuthProvider';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -66,6 +67,7 @@ const EMPTY_FORM = {
   notificarMultiplasVezes: false,
   datasNotificacao: ['', '', ''] as string[],
   anexoNome: '',
+  anexoUrl: '',        // path no Storage — preenchido após upload
   observacaoInterna: '',
 };
 
@@ -74,11 +76,11 @@ export default function PendixPendencias() {
   const isDark = theme === 'dark';
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { user } = useAuth();
 
   const [pendencias, setPendencias] = useState<PendixPendencia[]>([]);
   const [clientes, setClientes] = useState<PendixCliente[]>([]);
   const [empresas, setEmpresas] = useState<PendixEmpresa[]>([]);
-  const [links, setLinks] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
   const [search, setSearch] = useState(searchParams.get('busca') ?? '');
@@ -96,6 +98,8 @@ export default function PendixPendencias() {
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [salvando, setSalvando] = useState(false);
+  const [anexoFile, setAnexoFile] = useState<File | null>(null);
+  const autoEditedRef = useRef(false);
 
   const c = {
     page:   isDark ? 'text-gray-200'                    : 'text-gray-900',
@@ -124,7 +128,6 @@ export default function PendixPendencias() {
       setPendencias(p);
       if (!clientes.length) setClientes(cl);
       if (!empresas.length) setEmpresas(emp);
-      setLinks(getClienteEmpresaLinks());
     } catch {
       toast.error('Erro ao carregar pendências');
     } finally {
@@ -134,12 +137,25 @@ export default function PendixPendencias() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Auto-open edit modal when navigating from PendixPendenciaDetalhe via ?editId=<id>
+  const editIdParam = searchParams.get('editId');
+  useEffect(() => {
+    if (editIdParam && pendencias.length > 0 && !autoEditedRef.current) {
+      const p = pendencias.find(x => x.id === editIdParam);
+      if (p) {
+        autoEditedRef.current = true;
+        openEditarModal(p);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editIdParam, pendencias]);
+
   const visiveis = pendencias.filter(p => {
     if (filterPrioridade && p.prioridade !== filterPrioridade) return false;
     if (filterData && p.data_limite !== filterData) return false;
     if (filterEmpresa) {
-      const empresaDaPendencia = getPendenciaExtra(p.id).empresa_id ?? links[p.cliente_id];
-      if (empresaDaPendencia !== filterEmpresa) return false;
+      const clienteEmpresaId = (p.pendix_clientes as any)?.empresa_id;
+      if (clienteEmpresaId !== filterEmpresa) return false;
     }
     return true;
   });
@@ -192,12 +208,12 @@ export default function PendixPendencias() {
   }
 
   function openEditarModal(p: PendixPendencia) {
-    const extra = getPendenciaExtra(p.id);
     setEditandoId(p.id);
+    setAnexoFile(null);
     setForm({
       tipo: p.tipo ?? 'cliente',
       clienteId: p.cliente_id,
-      empresaId: extra.empresa_id ?? '',
+      empresaId: (p.pendix_clientes as any)?.empresa_id ?? '',
       escopoEmpresa: 'especifico',
       titulo: p.nome_documento,
       descricao: p.descricao ?? '',
@@ -209,13 +225,14 @@ export default function PendixPendencias() {
       notificarMultiplasVezes: (p.datas_notificacao?.length ?? 0) > 0,
       datasNotificacao: Array.from({ length: MAX_NOTIFICACOES_EXTRA }, (_, i) => p.datas_notificacao?.[i] ?? ''),
       anexoNome: p.arquivo_modelo_nome ?? '',
+      anexoUrl: p.arquivo_modelo_url ?? '',
       observacaoInterna: p.observacoes ?? '',
     });
     setModalOpen(true);
   }
 
   const clientesDaEmpresaSelecionada = form.empresaId
-    ? clientes.filter(cl => links[cl.id] === form.empresaId)
+    ? clientes.filter(cl => (cl as any).empresa_id === form.empresaId)
     : [];
 
   async function handleSalvar() {
@@ -226,6 +243,21 @@ export default function PendixPendencias() {
 
     setSalvando(true);
     try {
+      // Upload do arquivo de exemplo (se selecionado)
+      let arquivoModeloUrl: string | undefined = form.anexoUrl || undefined;
+      if (anexoFile) {
+        const eid = user?.officeId || 'sem-escritorio';
+        const path = `${eid}/modelos/${Date.now()}_${anexoFile.name}`;
+        const { data: storageData, error: storageErr } = await supabase.storage
+          .from('pendix-anexos')
+          .upload(path, anexoFile, { upsert: true });
+        if (storageErr) {
+          toast.error('Erro ao enviar arquivo: ' + storageErr.message);
+          setSalvando(false); return;
+        }
+        arquivoModeloUrl = storageData.path;
+      }
+
       const camposReais = {
         tipo: form.tipo,
         descricao: form.descricao || undefined,
@@ -233,10 +265,8 @@ export default function PendixPendencias() {
         data_inicio_cobranca: form.dataInicioCobranca || undefined,
         horario_notificacao: form.horarioNotificacao || '09:00',
         arquivo_modelo_nome: form.anexoNome || undefined,
+        arquivo_modelo_url: arquivoModeloUrl,
         datas_notificacao: form.notificarMultiplasVezes ? form.datasNotificacao.filter(Boolean) : [],
-      };
-      const extraLocal = {
-        empresa_id: form.tipo === 'empresa' ? form.empresaId : undefined,
       };
 
       if (editandoId) {
@@ -247,11 +277,12 @@ export default function PendixPendencias() {
           observacoes: form.observacaoInterna || undefined,
           ...camposReais,
         });
-        savePendenciaExtra(editandoId, extraLocal);
         setPendencias(prev => prev.map(p => p.id === editandoId ? updated : p));
         toast.success('Pendência atualizada');
       } else if (form.tipo === 'empresa' && form.escopoEmpresa === 'todos') {
-        const idsClientes = getClientesIdsDaEmpresa(form.empresaId).filter(id => clientes.some(cl => cl.id === id));
+        const idsClientes = clientes
+          .filter(cl => (cl as any).empresa_id === form.empresaId)
+          .map(cl => cl.id);
         if (!idsClientes.length) { toast.error('Nenhum cliente vinculado a essa empresa'); setSalvando(false); return; }
         const criadas: PendixPendencia[] = [];
         for (const clienteId of idsClientes) {
@@ -261,7 +292,6 @@ export default function PendixPendencias() {
             data_limite: form.dataVencimento || undefined, observacoes: form.observacaoInterna || undefined,
             ...camposReais,
           } as any);
-          savePendenciaExtra(nova.id, extraLocal);
           criadas.push(nova);
         }
         setPendencias(prev => [...criadas, ...prev]);
@@ -273,7 +303,6 @@ export default function PendixPendencias() {
           data_limite: form.dataVencimento || undefined, observacoes: form.observacaoInterna || undefined,
           ...camposReais,
         } as any);
-        savePendenciaExtra(nova.id, extraLocal);
         setPendencias(prev => [nova, ...prev]);
         toast.success('Pendência criada');
       }
@@ -629,7 +658,13 @@ export default function PendixPendencias() {
                   <span className={form.anexoNome ? '' : c.muted}>{form.anexoNome || 'Selecionar arquivo de exemplo...'}</span>
                   <input
                     type="file" className="hidden"
-                    onChange={e => setForm(p => ({ ...p, anexoNome: e.target.files?.[0]?.name ?? '' }))}
+                    onChange={e => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setAnexoFile(file);
+                        setForm(p => ({ ...p, anexoNome: file.name }));
+                      }
+                    }}
                   />
                 </label>
               </div>

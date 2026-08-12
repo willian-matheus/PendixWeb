@@ -12,6 +12,7 @@ type User = {
   telas?: string[];
   companyIds?: string[];
   plano?: PlanType;
+  telefone?: string;
 };
 
 type AuthContextType = {
@@ -76,7 +77,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       let id: string, nome: string, role: string, escritorio_id: string | null,
-          empresa_id: string | null, telas: string[], empresa_ids: string[];
+          empresa_id: string | null, telas: string[], empresa_ids: string[], telefone: string;
 
       if (fonte === 'tabela') {
         id            = data.id;
@@ -86,6 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         empresa_id    = data.empresa_id;
         telas         = data.telas || ['Dashboard', 'Notas Fiscais'];
         empresa_ids   = data.empresa_ids || [];
+        telefone      = data.telefone || '';
       } else {
         // Fallback: lê do user_metadata do Supabase Auth
         const { data: authData } = await supabase.auth.getUser();
@@ -101,6 +103,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           'Certificados','Chave Manual','API','Configurações','Novidades','Ajuda',
         ];
         empresa_ids   = meta.empresa_ids || [];
+        telefone      = meta.telefone || '';
 
         // Tenta corrigir o registro na tabela em background
         if (data && !ROLES_VALIDOS.includes(data.role)) {
@@ -125,7 +128,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         id, nome, email: authEmail, role,
         officeId: escritorio_id ?? undefined,
         companyId: empresa_id ?? undefined,
-        telas, companyIds: empresa_ids, plano,
+        telas, companyIds: empresa_ids, plano, telefone,
       };
 
       localStorage.setItem('flash_user', JSON.stringify(profile));

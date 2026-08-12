@@ -72,6 +72,11 @@ export default function PendixHistorico() {
   const [historico, setHistorico] = useState<PendixHistoricoEntry[]>([]);
   const [clientes, setClientes] = useState<PendixCliente[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [offset, setOffset] = useState(0);
+  const PAGE_SIZE = 50;
+
   const [search, setSearch] = useState('');
   const [filterCliente, setFilterCliente] = useState('');
   const [filterData, setFilterData] = useState('');
@@ -88,23 +93,27 @@ export default function PendixHistorico() {
     dateLabel: isDark ? 'text-gray-600' : 'text-gray-400',
   };
 
-  async function load() {
-    setLoading(true);
+  async function load(resetOffset = false) {
+    const currentOffset = resetOffset ? 0 : offset;
+    const isInitial = resetOffset || currentOffset === 0;
+    if (isInitial) setLoading(true); else setLoadingMore(true);
     try {
       const [h, cl] = await Promise.all([
-        getPendixHistorico({ clienteId: filterCliente || undefined }),
+        getPendixHistorico({ clienteId: filterCliente || undefined, limit: PAGE_SIZE, offset: currentOffset }),
         clientes.length ? Promise.resolve(clientes) : getPendixClientes(),
       ]);
-      setHistorico(h);
+      setHistorico(prev => isInitial ? h : [...prev, ...h]);
       if (!clientes.length) setClientes(cl);
+      setHasMore(h.length === PAGE_SIZE);
+      setOffset(currentOffset + h.length);
     } catch {
       toast.error('Erro ao carregar histórico');
     } finally {
-      setLoading(false);
+      setLoading(false); setLoadingMore(false);
     }
   }
 
-  useEffect(() => { load(); }, [filterCliente]);
+  useEffect(() => { setOffset(0); setHasMore(true); load(true); }, [filterCliente]);
 
   const filtered = historico.filter(e => {
     if (filterTipo && tipoDeAcao(e.acao) !== filterTipo) return false;
@@ -218,6 +227,18 @@ export default function PendixHistorico() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+      {!loading && hasMore && (
+        <div className="flex justify-center mt-6">
+          <button
+            onClick={() => load(false)}
+            disabled={loadingMore}
+            className={`flex items-center gap-2 px-6 py-2.5 text-sm font-bold rounded-xl border transition-colors disabled:opacity-50 ${isDark ? 'border-white/10 hover:bg-white/5' : 'border-gray-200 hover:bg-gray-50'}`}
+          >
+            <RefreshCw size={13} className={loadingMore ? 'animate-spin text-purple-400' : c.muted} />
+            {loadingMore ? 'Carregando...' : 'Carregar mais'}
+          </button>
         </div>
       )}
     </div>

@@ -1,6 +1,4 @@
 import { supabase } from '../../app/services/supabase';
-import { readLocal, writeLocal } from '../lib/localStore';
-import { getPendixEmpresas } from './empresas';
 
 function getSessionUser(): { officeId?: string; role?: string; nome?: string } | null {
   try { return JSON.parse(localStorage.getItem('flash_user') || 'null'); }
@@ -42,6 +40,7 @@ export interface PendixCliente {
   tipo?: PendixClienteTipo;
   consentimento_whatsapp?: boolean;
   observacoes: string;
+  empresa_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -90,7 +89,7 @@ export interface PendixPendencia {
   horario_notificacao?: string;
   created_at: string;
   updated_at: string;
-  pendix_clientes?: { nome: string; telefone?: string };
+  pendix_clientes?: { nome: string; telefone?: string; empresa_id?: string | null; pendix_empresas?: { id: string; nome: string; telefone?: string; email?: string } | null };
 }
 
 export interface PendixHistoricoEntry {
@@ -180,7 +179,7 @@ export async function getPendixPendencias(filters?: {
 }) {
   let q = supabase
     .from('pendix_pendencias')
-    .select('*, pendix_clientes(nome, telefone)')
+    .select('*, pendix_clientes(nome, telefone, empresa_id)')
     .order('data_limite', { ascending: true });
 
   if (!isSuperAdmin()) {
@@ -211,7 +210,7 @@ export async function postPendixPendencia(
   const { data, error } = await supabase
     .from('pendix_pendencias')
     .insert({ ...p, escritorio_id: p.escritorio_id || eid })
-    .select().single();
+    .select('*, pendix_clientes(nome, telefone, empresa_id)').single();
   if (error) throw error;
   return data as PendixPendencia;
 }
@@ -223,7 +222,8 @@ export async function updatePendixPendenciaStatus(
   if (status === 'recebido') payload.data_recebimento = new Date().toISOString();
   if (obs !== undefined) payload.observacoes = obs;
   const { data, error } = await supabase
-    .from('pendix_pendencias').update(payload).eq('id', id).select().single();
+    .from('pendix_pendencias').update(payload).eq('id', id)
+    .select('*, pendix_clientes(nome, telefone, empresa_id, pendix_empresas(id, nome, telefone, email))').single();
   if (error) throw error;
   return data as PendixPendencia;
 }
@@ -240,7 +240,7 @@ export async function updatePendixPendenciaCampos(
   const { data, error } = await supabase
     .from('pendix_pendencias')
     .update({ ...p, updated_at: new Date().toISOString() })
-    .eq('id', id).select('*, pendix_clientes(nome, telefone)').single();
+    .eq('id', id).select('*, pendix_clientes(nome, telefone, empresa_id)').single();
   if (error) throw error;
   return data as PendixPendencia;
 }
@@ -248,7 +248,7 @@ export async function updatePendixPendenciaCampos(
 export async function getPendixPendenciaPorId(id: string) {
   const { data, error } = await supabase
     .from('pendix_pendencias')
-    .select('*, pendix_clientes(nome, telefone)')
+    .select('*, pendix_clientes(nome, telefone, empresa_id, pendix_empresas(id, nome, telefone, email))')
     .eq('id', id).single();
   if (error) throw error;
   return data as PendixPendencia;
@@ -257,7 +257,6 @@ export async function getPendixPendenciaPorId(id: string) {
 export async function deletePendixPendencia(id: string) {
   const { error } = await supabase.from('pendix_pendencias').delete().eq('id', id);
   if (error) throw error;
-  deletePendenciaExtra(id);
 }
 
 // `arquivo_url` guarda o caminho no bucket privado `pendix-anexos` (não uma URL pública) —
@@ -295,10 +294,19 @@ export async function gerarPendenciasMes(clienteId: string, competencia: string)
 
 // ── Histórico ──────────────────────────────────────────────────────────────
 
-export async function getPendixHistorico(opts?: { clienteId?: string; pendenciaId?: string }) {
+export async function getPendixHistorico(opts?: {
+  clienteId?: string;
+  pendenciaId?: string;
+  limit?: number;
+  offset?: number;
+}) {
+  const limit = opts?.limit ?? 50;
+  const offset = opts?.offset ?? 0;
+
   let q = supabase
     .from('pendix_historico').select('*')
-    .order('created_at', { ascending: false }).limit(300);
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
 
   if (!isSuperAdmin()) {
     const eid = sessionOfficeId();
@@ -324,39 +332,6 @@ export async function addPendixHistorico(
   });
 }
 
-// ── Extras locais da pendência ───────────────────────────────────────────
-// tipo, descricao, prioridade, data_inicio_cobranca, arquivo_modelo_* e
-// datas_notificacao agora são colunas reais em pendix_pendencias (ver
-// migrations 0011 e 0013). O que resta aqui é só o vínculo com "empresa"
-// (agrupador que ainda vive só no navegador, sem tabela no Supabase — ver
-// services/empresas.ts).
-
-const KEY_EXTRAS = 'pendix_mock_pendencia_extras_v1';
-
-export interface PendixPendenciaExtra {
-  empresa_id?: string;
-}
-
-function loadExtras(): Record<string, PendixPendenciaExtra> {
-  return readLocal(KEY_EXTRAS, {});
-}
-
-export function getPendenciaExtra(pendenciaId: string): PendixPendenciaExtra {
-  return loadExtras()[pendenciaId] ?? {};
-}
-
-export function savePendenciaExtra(pendenciaId: string, patch: PendixPendenciaExtra): void {
-  const all = loadExtras();
-  all[pendenciaId] = { ...all[pendenciaId], ...patch };
-  writeLocal(KEY_EXTRAS, all);
-}
-
-export function deletePendenciaExtra(pendenciaId: string): void {
-  const all = loadExtras();
-  delete all[pendenciaId];
-  writeLocal(KEY_EXTRAS, all);
-}
-
 // ── Stats helper ───────────────────────────────────────────────────────────
 
 export async function getPendixStats() {
@@ -369,7 +344,7 @@ export async function getPendixStats() {
 
   const [clientes, empresas, abertas, vencidasPendente, concluidas] = await Promise.all([
     applyFilter(supabase.from('pendix_clientes').select('id', { count: 'exact', head: true })),
-    getPendixEmpresas(),
+    applyFilter(supabase.from('pendix_empresas').select('id', { count: 'exact', head: true }).eq('status', 'ativa')),
     applyFilter(supabase.from('pendix_pendencias').select('id', { count: 'exact', head: true }).in('status', ['pendente', 'em_analise'])),
     // "vencida" não é mais um status guardado — é calculado (pendente + data_limite no passado)
     applyFilter(supabase.from('pendix_pendencias').select('id', { count: 'exact', head: true }).eq('status', 'pendente').lt('data_limite', today)),
@@ -378,9 +353,43 @@ export async function getPendixStats() {
 
   return {
     totalClientes: clientes.count ?? 0,
-    totalEmpresas: empresas.filter(e => e.status === 'ativa').length,
+    totalEmpresas: empresas.count ?? 0,
     pendenciasAbertas: abertas.count ?? 0,
     vencidas: vencidasPendente.count ?? 0,
     concluidas: concluidas.count ?? 0,
   };
+}
+
+// ── Monthly pendências chart (real data) ─────────────────────────────────────
+
+export async function getPendixPendenciasPorMes(numMeses = 6) {
+  const meses: string[] = [];
+  const now = new Date();
+  for (let i = numMeses - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    meses.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+
+  let q = supabase.from('pendix_pendencias').select('competencia').in('competencia', meses);
+  if (!isSuperAdmin()) {
+    const eid = sessionOfficeId();
+    if (eid) q = q.eq('escritorio_id', eid);
+  }
+
+  const { data, error } = await q;
+  if (error) throw error;
+
+  const counts: Record<string, number> = {};
+  for (const m of meses) counts[m] = 0;
+  for (const row of data ?? []) {
+    if (row.competencia in counts) counts[row.competencia]++;
+  }
+
+  return meses.map(m => {
+    const d = new Date(m + '-15'); // mid-month avoids TZ off-by-one
+    return {
+      mes: d.toLocaleDateString('pt-BR', { month: 'short' }),
+      pendencias: counts[m],
+    };
+  });
 }
