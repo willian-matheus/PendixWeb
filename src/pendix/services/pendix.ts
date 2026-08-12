@@ -353,9 +353,14 @@ export async function gerarPendenciasMes(clienteId: string, competencia: string)
 
 // ── Histórico ──────────────────────────────────────────────────────────────
 
-export async function getPendixHistorico(opts?: { clienteId?: string; pendenciaId?: string }) {
+export async function getPendixHistorico(opts?: {
+  clienteId?: string; pendenciaId?: string; limit?: number; offset?: number;
+}) {
   const { blocked, eid } = requireTenantScope();
   if (blocked) return [];
+
+  const limit = opts?.limit ?? 50;
+  const offset = opts?.offset ?? 0;
 
   let q = supabase
     .from('pendix_historico').select('*')
