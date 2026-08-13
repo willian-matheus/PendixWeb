@@ -12,6 +12,12 @@ import Topbar from '../components/Topbar';
 import PendixLogo from '../components/PendixLogo';
 import PendixWordmark from '../components/PendixWordmark';
 
+const ROLE_LABEL: Record<string, string> = {
+  admin: 'Administrador', super_admin: 'Administrador', master: 'Master',
+  contador: 'Contador', cliente_empresa: 'Cliente',
+  acesso_completo: 'Acesso completo', visualizador: 'Visualizador',
+};
+
 const NAV = [
   { icon: LayoutDashboard, label: 'Dashboard',     path: '/pendix/app' },
   { icon: Users,           label: 'Clientes',      path: '/pendix/app/clientes' },
@@ -126,7 +132,7 @@ export default function PendixRoot() {
             <div className="overflow-hidden">
               <p className={`text-xs font-bold truncate w-28 ${c.userName}`}>{user?.nome || 'Usuário'}</p>
               <p className={`text-[9px] uppercase tracking-wider truncate w-28 ${c.userRole}`}>
-                {user?.role?.replace('_', ' ') || ''}
+                {(user?.role && ROLE_LABEL[user.role]) || user?.role?.replace('_', ' ') || ''}
               </p>
             </div>
           </div>

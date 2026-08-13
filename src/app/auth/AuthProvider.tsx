@@ -59,7 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const ROLES_VALIDOS = ['admin', 'dono_escritorio', 'contador', 'cliente_empresa', 'acesso_completo', 'visualizador'];
+  const ROLES_VALIDOS = ['admin', 'super_admin', 'master', 'contador', 'cliente_empresa', 'acesso_completo', 'visualizador'];
 
   const fetchUserProfile = async (userId: string, authEmail: string) => {
     try {
@@ -94,7 +94,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const meta = authData?.user?.user_metadata || {};
         id            = userId;
         nome          = meta.nome || authEmail;
-        role          = meta.role || 'dono_escritorio';
+        role          = meta.role || 'master';
         escritorio_id = meta.escritorio_id || null;
         empresa_id    = meta.empresa_id || null;
         telas         = meta.telas || [
