@@ -59,7 +59,7 @@ export default function PendixRegistro() {
         email,
         password: senha,
         options: {
-          data: { nome, telefone, cpf_cnpj: documento, role: 'master' },
+          data: { nome, telefone, cpf_cnpj: documento },
         },
       });
       if (signUpError) {

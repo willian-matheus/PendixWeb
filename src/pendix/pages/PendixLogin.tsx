@@ -26,16 +26,16 @@ export default function PendixLogin() {
   const [senha, setSenha] = useState('');
   const [loading, setLoading] = useState(false);
   const [loginError, setLoginError] = useState('');
-  const { signIn, token, loading: authLoading } = useAuth();
+  const { signIn, token, user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const redirectTo = (location.state as any)?.from || '/pendix/app';
 
   useEffect(() => {
-    if (!authLoading && token) {
+    if (!authLoading && token && user) {
       navigate(redirectTo, { replace: true });
     }
-  }, [token, authLoading, navigate, redirectTo]);
+  }, [token, user, authLoading, navigate, redirectTo]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

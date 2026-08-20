@@ -2,7 +2,7 @@ import { Navigate, useLocation } from 'react-router';
 import { useAuth } from '../../app/auth/AuthProvider';
 
 export function RequirePendixAuth({ children }: { children: React.ReactNode }) {
-  const { token, loading } = useAuth();
+  const { token, user, loading } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -13,7 +13,7 @@ export function RequirePendixAuth({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!token) {
+  if (!token || !user) {
     return <Navigate to="/pendix/login" state={{ from: location.pathname }} replace />;
   }
 

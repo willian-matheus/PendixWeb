@@ -1,23 +1,38 @@
 // Edge Function: dispara cobranças via WhatsApp automaticamente, respeitando
 // o horário configurado em cada pendência (`horario_notificacao`).
 //
-// Duas passagens:
-// 1) Contato inicial — pendências 'pendente' nunca contatadas
-//    (ultima_mensagem_enviada_em IS NULL), a partir de data_inicio_cobranca.
+// Quem precisa agir é o CLIENTE — é ele que tem o documento —, então toda
+// mensagem daqui vai para o telefone dele.
+//
+// Três passagens:
+// 1) Contato inicial (LEGADO) — só para pendências com a cobrança automática
+//    desligada. Quem está com ela ligada é atendido pela passagem 3, que faz
+//    o mesmo primeiro contato e ainda dá seguimento.
 // 2) Lembretes agendados — pendências 'pendente' cuja data de hoje está em
 //    `datas_notificacao` e ainda não foi enviada hoje
 //    (`datas_notificacao_enviadas`).
+// 3) Cobrança automática recorrente — pendências com `cobranca_automatica`,
+//    cobradas no ritmo de `cobranca_frequencia` (diária → bienal) até o
+//    documento chegar ou o teto `max_reenvios` do escritório ser atingido. O
+//    tom sobe com o atraso usando os prazos de `pendix_configuracao_cobranca`.
+//    A regra vive em ./cobranca.ts (cópia testada de PendixApp/lib/cobranca.ts).
+//
+// A ordem importa: a 3 roda por último e relê o banco, então uma mensagem
+// mandada pelas passagens anteriores entra no cooldown e o cliente não leva
+// duas no mesmo dia.
 //
 // Pensado pra ser chamado periodicamente por um cron (pg_cron + pg_net, ver
 // migration 0015_cron_whatsapp.sql) — cada execução só processa quem já
 // bateu o horário configurado, então rodar a cada poucos minutos é seguro.
-//
-// TODO (escopo futuro, não implementado ainda): escalonamento de cobrança
-// por nível (amigável → lembrete → urgente → crítico) usando os prazos
-// configurados em `pendix_configuracao_cobranca` (dias_amigavel/lembrete/
-// urgente, cooldown, max_reenvios).
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import {
+  decidirCobranca,
+  montarMensagemCobranca,
+  reagendarAposFalha,
+  REGRAS_PADRAO,
+  type RegrasCobranca,
+} from './cobranca.ts';
 
 const TIMEZONE = 'America/Sao_Paulo';
 
@@ -31,6 +46,24 @@ type PendenciaBase = {
   competencia: string;
   horario_notificacao: string;
   pendix_clientes: Cliente;
+};
+
+type PendenciaAutomatica = {
+  id: string;
+  escritorio_id: string;
+  cliente_id: string;
+  nome_documento: string;
+  competencia: string;
+  status: string;
+  data_limite: string | null;
+  horario_notificacao: string | null;
+  data_inicio_cobranca: string | null;
+  ultima_mensagem_enviada_em: string | null;
+  cobranca_automatica: boolean | null;
+  cobranca_frequencia: string | null;
+  proxima_cobranca_em: string | null;
+  cobrancas_enviadas: number | null;
+  pendix_clientes: { nome: string; telefone: string; consentimento_whatsapp: boolean | null } | null;
 };
 
 function normalizePhone(phone: string): string {
@@ -126,6 +159,29 @@ async function enviarMensagemPendencia(
   return true;
 }
 
+/**
+ * Envio que falhou: adia para amanha SEM contar contra o teto (a mensagem nao
+ * chegou) e sem mexer no cooldown (que so olha envio bem-sucedido). Sem isto a
+ * pendencia continua elegivel e o cron tenta de novo a cada 10 minutos, para
+ * sempre — e se a Z-API tiver entregue mesmo devolvendo erro, o cliente leva
+ * uma cobranca a cada 10 minutos.
+ */
+async function marcarFalhaDeEnvio(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  pendenciaId: string,
+  hoje: string,
+): Promise<void> {
+  try {
+    await supabase
+      .from('pendix_pendencias')
+      .update({ proxima_cobranca_em: reagendarAposFalha(hoje) })
+      .eq('id', pendenciaId);
+  } catch (err) {
+    console.error('send-whatsapp-pendentes: falha ao adiar cobranca', String(err));
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'method not allowed' }), { status: 405 });
@@ -139,9 +195,28 @@ Deno.serve(async (req) => {
   const zapiUrl = `https://api.z-api.io/instances/${zapiInstanceId}/token/${zapiInstanceToken}/send-text`;
 
   const supabase = createClient(supabaseUrl, serviceRoleKey);
+
+  const suppliedCronSecret = req.headers.get('x-pendix-cron-secret') ?? '';
+  const { data: cronAuthorized, error: cronAuthError } = await supabase.rpc(
+    'pendix_verify_send_whatsapp_cron_secret',
+    { supplied_secret: suppliedCronSecret },
+  );
+  if (cronAuthError) {
+    console.error('send-whatsapp-pendentes: falha ao validar segredo do cron', cronAuthError.message);
+    return new Response(JSON.stringify({ error: 'cron authorization unavailable' }), { status: 500 });
+  }
+  if (cronAuthorized !== true) {
+    return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 });
+  }
+
   const { data: hoje, minutos: minutosAgora } = agoraBR();
 
-  const results: { pendencia_id: string; tipo: 'inicial' | 'lembrete'; ok: boolean }[] = [];
+  const results: {
+    pendencia_id: string;
+    tipo: 'inicial' | 'lembrete' | 'automatica';
+    ok: boolean;
+    nivel?: string;
+  }[] = [];
 
   // ── Passagem 1: contato inicial ──────────────────────────────────────
   const { data: iniciais, error: erroIniciais } = await supabase
@@ -150,6 +225,7 @@ Deno.serve(async (req) => {
       'id, escritorio_id, cliente_id, nome_documento, competencia, horario_notificacao, data_inicio_cobranca, pendix_clientes(nome, telefone)',
     )
     .eq('status', 'pendente')
+    .eq('cobranca_automatica', false)
     .is('ultima_mensagem_enviada_em', null)
     .or(`data_inicio_cobranca.is.null,data_inicio_cobranca.lte.${hoje}`)
     .limit(50);
@@ -221,6 +297,89 @@ Deno.serve(async (req) => {
     } catch (err) {
       console.error('send-whatsapp-pendentes: falha (lembrete)', String(err));
       results.push({ pendencia_id: p.id, tipo: 'lembrete', ok: false });
+    }
+  }
+
+  // -- Passagem 3: cobranca automatica recorrente -----------------------
+  // Roda depois das outras duas de proposito: rele o banco ja com o
+  // `ultima_mensagem_enviada_em` que elas gravaram, e o cooldown evita
+  // mandar duas mensagens para o mesmo cliente no mesmo dia.
+  const { data: automaticas, error: erroAutomaticas } = await supabase
+    .from('pendix_pendencias')
+    .select(
+      'id, escritorio_id, cliente_id, nome_documento, competencia, status, data_limite, ' +
+      'horario_notificacao, data_inicio_cobranca, ultima_mensagem_enviada_em, ' +
+      'cobranca_automatica, cobranca_frequencia, proxima_cobranca_em, cobrancas_enviadas, ' +
+      'pendix_clientes(nome, telefone, consentimento_whatsapp)',
+    )
+    .eq('status', 'pendente')
+    .eq('cobranca_automatica', true)
+    .or(`proxima_cobranca_em.is.null,proxima_cobranca_em.lte.${hoje}`)
+    // Ordenado para o corte do limite ser deterministico: quem esta esperando
+    // ha mais tempo passa na frente, e o resto entra na proxima execucao (10
+    // minutos depois), em vez de ficar em um sorteio a cada rodada.
+    .order('proxima_cobranca_em', { ascending: true, nullsFirst: true })
+    .limit(100);
+
+  if (erroAutomaticas) {
+    return new Response(JSON.stringify({ error: erroAutomaticas.message }), { status: 500 });
+  }
+
+  const candidatas = (automaticas ?? []) as unknown as PendenciaAutomatica[];
+
+  // Uma consulta so para as regras de todos os escritorios envolvidos.
+  const regrasPorEscritorio = new Map<string, RegrasCobranca>();
+  if (candidatas.length > 0) {
+    const escritorios = [...new Set(candidatas.map((p) => p.escritorio_id))];
+    const { data: configs } = await supabase
+      .from('pendix_configuracao_cobranca')
+      .select('*')
+      .in('escritorio_id', escritorios);
+    for (const c of (configs ?? []) as (RegrasCobranca & { escritorio_id: string })[]) {
+      regrasPorEscritorio.set(c.escritorio_id, c);
+    }
+  }
+
+  const agoraIso = new Date().toISOString();
+
+  for (const p of candidatas) {
+    // Escritorio sem linha de configuracao usa os mesmos padroes do app.
+    const regras = regrasPorEscritorio.get(p.escritorio_id) ?? REGRAS_PADRAO;
+    const cliente = p.pendix_clientes;
+
+    const decisao = decidirCobranca(
+      { ...p, cliente },
+      regras,
+      { data: hoje, minutos: minutosAgora, iso: agoraIso },
+    );
+    if (!decisao.cobrar) continue;
+
+    const texto = montarMensagemCobranca(decisao.nivel!, {
+      cliente: cliente!.nome,
+      documento: p.nome_documento,
+      competencia: p.competencia,
+      data_limite: p.data_limite,
+    });
+
+    try {
+      const ok = await enviarMensagemPendencia(supabase, zapiUrl, zapiClientToken, p, cliente!, texto);
+      if (ok) {
+        await supabase.from('pendix_pendencias').update({
+          ultima_mensagem_enviada_em: new Date().toISOString(),
+          cobrancas_enviadas: decisao.cobrancas_enviadas,
+          proxima_cobranca_em: decisao.proxima_cobranca_em,
+          nivel_cobranca_atual: decisao.nivel,
+          // Campo legado, mantido em sincronia para as telas antigas.
+          tentativas_reenvio: decisao.cobrancas_enviadas,
+        }).eq('id', p.id);
+      } else {
+        await marcarFalhaDeEnvio(supabase, p.id, hoje);
+      }
+      results.push({ pendencia_id: p.id, tipo: 'automatica', ok, nivel: decisao.nivel });
+    } catch (err) {
+      console.error('send-whatsapp-pendentes: falha (automatica)', String(err));
+      await marcarFalhaDeEnvio(supabase, p.id, hoje);
+      results.push({ pendencia_id: p.id, tipo: 'automatica', ok: false, nivel: decisao.nivel });
     }
   }
 

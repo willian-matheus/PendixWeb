@@ -33,16 +33,9 @@ type AuthContextType = {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('flash_token'));
-  const [user, setUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('flash_user');
-    try {
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
-  const [loading, setLoading] = useState(() => !localStorage.getItem('flash_token'));
+  const [token, setToken] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [impersonatedOfficeId, setImpersonatedOfficeId] = useState<string | null>(() => localStorage.getItem('flash_impersonated_office_id'));
   const [impersonatedOfficeName, setImpersonatedOfficeName] = useState<string | null>(() => localStorage.getItem('flash_impersonated_office_name'));
@@ -61,80 +54,60 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const ROLES_VALIDOS = ['admin', 'super_admin', 'master', 'contador', 'cliente_empresa', 'acesso_completo', 'visualizador'];
 
+  const clearAuthCache = () => {
+    localStorage.removeItem('flash_token');
+    localStorage.removeItem('flash_user');
+  };
+
   const fetchUserProfile = async (userId: string, authEmail: string) => {
     try {
-      // Tenta buscar da tabela usuarios
       const { data, error } = await supabase
         .from('usuarios')
         .select('*')
         .eq('id', userId)
         .single();
 
-      // Determina a fonte de dados: tabela usuarios (se válida) ou user_metadata como fallback
-      let fonte: 'tabela' | 'metadata' = 'tabela';
-      if (error || !data || !ROLES_VALIDOS.includes(data.role)) {
-        fonte = 'metadata';
+      if (error || !data) {
+        console.error('Perfil de usuário não encontrado:', error?.message);
+        clearAuthCache();
+        return null;
       }
 
-      let id: string, nome: string, role: string, escritorio_id: string | null,
-          empresa_id: string | null, telas: string[], empresa_ids: string[], telefone: string;
-
-      if (fonte === 'tabela') {
-        id            = data.id;
-        nome          = data.nome;
-        role          = data.role;
-        escritorio_id = data.escritorio_id;
-        empresa_id    = data.empresa_id;
-        telas         = data.telas || ['Dashboard', 'Notas Fiscais'];
-        empresa_ids   = data.empresa_ids || [];
-        telefone      = data.telefone || '';
-      } else {
-        // Fallback: lê do user_metadata do Supabase Auth
-        const { data: authData } = await supabase.auth.getUser();
-        const meta = authData?.user?.user_metadata || {};
-        id            = userId;
-        nome          = meta.nome || authEmail;
-        role          = meta.role || 'master';
-        escritorio_id = meta.escritorio_id || null;
-        empresa_id    = meta.empresa_id || null;
-        telas         = meta.telas || [
-          'Dashboard','Notas Fiscais','Empresas','Usuários','Equipe',
-          'Solicitações','Agendamentos','Processos','Relatórios',
-          'Certificados','Chave Manual','API','Configurações','Novidades','Ajuda',
-        ];
-        empresa_ids   = meta.empresa_ids || [];
-        telefone      = meta.telefone || '';
-
-        // Tenta corrigir o registro na tabela em background
-        if (data && !ROLES_VALIDOS.includes(data.role)) {
-          supabase.from('usuarios').update({
-            nome, role, escritorio_id, empresa_id, telas, empresa_ids,
-          }).eq('id', userId).then(() => {});
-        }
+      if (!ROLES_VALIDOS.includes(data.role)) {
+        console.error('Perfil de usuário com role inválida:', data.role);
+        clearAuthCache();
+        return null;
       }
 
       // Busca o plano do escritório
       let plano: PlanType = 'normal';
-      if (escritorio_id) {
+      if (data.escritorio_id) {
         const { data: escData } = await supabase
           .from('empresas')
           .select('plano')
-          .eq('id', escritorio_id)
+          .eq('id', data.escritorio_id)
           .maybeSingle();
         if (escData?.plano === 'pro') plano = 'pro';
       }
 
       const profile: User = {
-        id, nome, email: authEmail, role,
-        officeId: escritorio_id ?? undefined,
-        companyId: empresa_id ?? undefined,
-        telas, companyIds: empresa_ids, plano, telefone,
+        id: data.id,
+        nome: data.nome,
+        email: authEmail,
+        role: data.role,
+        officeId: data.escritorio_id ?? undefined,
+        companyId: data.empresa_id ?? undefined,
+        telas: data.telas || ['Dashboard', 'Notas Fiscais'],
+        companyIds: data.empresa_ids || [],
+        plano,
+        telefone: data.telefone || '',
       };
 
       localStorage.setItem('flash_user', JSON.stringify(profile));
       return profile;
     } catch (err) {
       console.error('Exceção ao buscar perfil:', err);
+      clearAuthCache();
       return null;
     }
   };
@@ -143,10 +116,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Verificar sessão atual ao montar
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        setToken(session.access_token);
-        localStorage.setItem('flash_token', session.access_token);
         fetchUserProfile(session.user.id, session.user.email || '').then(profile => {
-          if (profile) setUser(profile);
+          if (profile) {
+            setUser(profile);
+            setToken(session.access_token);
+          } else {
+            supabase.auth.signOut();
+            setToken(null);
+            setUser(null);
+          }
           setLoading(false);
         });
       } else {
@@ -156,11 +134,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // fica preso em erros 401 sem nunca voltar pro login.
         setToken(null);
         setUser(null);
-        localStorage.removeItem('flash_token');
-        localStorage.removeItem('flash_user');
+        clearAuthCache();
         setLoading(false);
       }
     }).catch(() => {
+      clearAuthCache();
       setLoading(false);
     });
 
@@ -169,18 +147,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (event === 'SIGNED_OUT') {
           setToken(null);
           setUser(null);
-          localStorage.removeItem('flash_token');
-          localStorage.removeItem('flash_user');
+          clearAuthCache();
           setLoading(false);
         } else if (session) {
-          setToken(session.access_token);
-          localStorage.setItem('flash_token', session.access_token);
-          
-          // Set loading false immediately to allow navigation
-          setLoading(false);
-
           fetchUserProfile(session.user.id, session.user.email || '').then(profile => {
-            if (profile) setUser(profile);
+            if (profile) {
+              setUser(profile);
+              setToken(session.access_token);
+            } else {
+              supabase.auth.signOut();
+              setToken(null);
+              setUser(null);
+            }
+            setLoading(false);
           });
         }
       }
@@ -212,19 +191,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (data.session) {
-        setToken(data.session.access_token);
-        localStorage.setItem('flash_token', data.session.access_token);
-        
-        // Set loading false as soon as we have a session to speed up redirect
-        setLoading(false);
-        
-        // Execute profile fetch in background
-        fetchUserProfile(
+        const profile = await fetchUserProfile(
           data.session.user.id,
           data.session.user.email || ''
-        ).then(profile => {
-          if (profile) setUser(profile);
-        });
+        );
+
+        if (!profile) {
+          await supabase.auth.signOut();
+          throw new Error('Perfil de usuário inválido ou sem permissão.');
+        }
+
+        setUser(profile);
+        setToken(data.session.access_token);
+        setLoading(false);
       }
     } catch (err: any) {
       setError(err.message || 'Não foi possível fazer login.');
@@ -239,8 +218,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setImpersonatedOfficeId(null);
     setImpersonatedOfficeName(null);
-    localStorage.removeItem('flash_token');
-    localStorage.removeItem('flash_user');
+    clearAuthCache();
     localStorage.removeItem('flash_impersonated_office_id');
     localStorage.removeItem('flash_impersonated_office_name');
   };
