@@ -42,6 +42,7 @@
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { algumaFaturaBloqueia } from '../_shared/faturas.ts';
+import { nomeArquivoSeguro } from '../_shared/arquivos.ts';
 
 const STATUS_MAP: Record<string, string> = {
   SENT: 'enviada',
@@ -161,7 +162,10 @@ async function baixarEGuardarMidia(
     const resp = await fetch(midia.url);
     if (!resp.ok) return null;
     const bytes = new Uint8Array(await resp.arrayBuffer());
-    const path = `${escritorioId}/${clienteId}/${Date.now()}-${midia.fileName}`;
+    // fileName vem do payload do WhatsApp, ou seja, de quem manda a mensagem.
+    // Sem sanitizar, um arquivo chamado "../../outro-escritorio/x/nota.pdf"
+    // monta um caminho que sobe para fora da pasta deste tenant.
+    const path = `${escritorioId}/${clienteId}/${Date.now()}-${nomeArquivoSeguro(midia.fileName)}`;
     const { error } = await supabase.storage
       .from('pendix-anexos')
       .upload(path, bytes, { contentType: midia.mimeType, upsert: false });
@@ -1399,10 +1403,40 @@ Deno.serve(async (req) => {
     }
 
     const telefone = localPhoneDigits(payload.phone ?? '');
-    const { data: clientes } = await supabase
+
+    // Filtra NO BANCO pelos 8 últimos dígitos (coluna gerada e indexada,
+    // migration 0023) em vez de carregar todo cliente de todo escritório na
+    // memória a cada mensagem. Os 8 finais são a parte estável do número:
+    // não mudam com DDI, com o nono dígito, nem com formatação.
+    const { data: candidatosTelefone } = await supabase
       .from('pendix_clientes')
-      .select('id, escritorio_id, empresa_id, telefone, nome, email, telefone_verificado');
-    const cliente = (clientes ?? []).find((c: any) => localPhoneDigits(c.telefone) === telefone);
+      .select('id, escritorio_id, empresa_id, telefone, nome, email, telefone_verificado')
+      .eq('telefone_digits', telefone.slice(-8));
+
+    // A comparação fina continua em JS: `telefone` é texto livre no banco, e
+    // localPhoneDigits normaliza o que o sufixo sozinho não distingue (DDD).
+    const matches = (candidatosTelefone ?? []).filter(
+      (c: any) => localPhoneDigits(c.telefone) === telefone,
+    );
+
+    // Mesmo telefone em MAIS DE UM escritório: não dá para adivinhar de quem
+    // é a mensagem. O código antigo pegava o primeiro do `.find()`, o que
+    // arquivava o documento no cliente de OUTRO tenant. Aqui cai no fluxo de
+    // identificação por e-mail, que resolve sem chutar.
+    const escritoriosDistintos = new Set(matches.map((c: any) => c.escritorio_id));
+    if (escritoriosDistintos.size > 1) {
+      console.warn(
+        'whatsapp-webhook: telefone presente em mais de um escritorio, pedindo identificacao',
+        { escritorios: escritoriosDistintos.size },
+      );
+      await handleIdentificacaoFlow(supabase, payload.phone ?? '', conteudo.texto);
+      return new Response(
+        JSON.stringify({ ok: true, mode: 'identificacao_ambigua' }),
+        { status: 200 },
+      );
+    }
+
+    const cliente = matches[0];
 
     if (!cliente) {
       await handleIdentificacaoFlow(supabase, payload.phone ?? '', conteudo.texto);
