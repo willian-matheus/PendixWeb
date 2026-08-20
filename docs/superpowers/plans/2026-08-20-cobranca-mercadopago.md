@@ -10,6 +10,25 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-20-cobranca-mercadopago-design.md`
 
+## Status em 2026-08-20
+
+Todo o código está escrito e commitado na branch `feat/cobranca-mercadopago`.
+39 testes passam (`npm test`) e o build passa (`npm run build`).
+
+**Nada foi aplicado no Supabase.** Não há CLI nem Docker no ambiente onde o
+plano foi executado, e a permissão para escrever DDL no projeto remoto foi
+negada. As migrations e Edge Functions existem como arquivo, prontas para
+aplicar, mas **nenhuma foi executada contra um banco** — logo, nenhuma foi
+verificada de verdade.
+
+Pendente, na ordem: aplicar `0019` → `0020` → `0021`, deployar as quatro Edge
+Functions (a `mercadopago-webhook` com `--no-verify-jwt`), gravar os secrets,
+registrar a URL do webhook e rodar a Task 14 ponta a ponta com usuários de
+teste. Os passos de verificação de cada task descrevem o que conferir.
+
+A `0022` é independente da feature: fecha funções `security definer` expostas
+a `anon`, achadas pelo linter do Supabase.
+
 ## Global Constraints
 
 - Migrations começam na `0019`. A última existente é a `0018`.
@@ -1606,9 +1625,11 @@ No menu de `PendixRoot.tsx`, mostre "Financeiro" para o escritório e "Minhas fa
 
 - [ ] **Step 6: Somar faturas ao sino de notificações**
 
-Não existe tabela `pendix_notificacoes` — `src/pendix/services/notificacoes.ts` deriva as notificações de `pendix_pendencias` (veja as queries nas linhas 129, 158 e 189). Adicione uma origem a mais, consultando `pendix_faturas` com `status in ('aberta','vencida')` e vencimento próximo, no mesmo formato de objeto que as outras origens devolvem.
+`public.pendix_notificacoes` existe no banco (colunas: `escritorio_id`, `usuario_id`, `pendencia_id`, `cliente_id`, `tipo`, `titulo`, `mensagem`, `canal`, `status`, `dados jsonb`, `chave_dedupe`, `enviado_em`, `lido_em`, `dispensado_em`, `erro`).
 
-Leia o arquivo inteiro antes de editar, para devolver exatamente a mesma forma — divergir no shape quebra a tela de notificações em silêncio.
+Em vez de derivar no front, a `mp-faturas-vencer` (Task 9) insere a notificação junto com o alerta de WhatsApp, usando `chave_dedupe = 'fatura:' || fatura_id || ':' || marco`. A deduplicação já existe nessa tabela e passa a proteger o alerta de fatura de graça.
+
+Leia `src/pendix/services/notificacoes.ts` antes de editar, para consumir exatamente o mesmo shape que a tela já espera.
 
 - [ ] **Step 7: Verificar no navegador**
 

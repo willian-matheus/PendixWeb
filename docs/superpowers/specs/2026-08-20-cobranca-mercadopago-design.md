@@ -224,9 +224,16 @@ Escalonamento por fatura em aberto, reaproveitando a Z-API já integrada em
 A coluna `alertas_enviados` impede reenvio duplicado, mesmo padrão de
 `datas_notificacao_enviadas` nas pendências.
 
-Não existe tabela `pendix_notificacoes` — o sino do app deriva notificações
-de pendências em `src/pendix/services/notificacoes.ts`. As faturas entram
-nesse mesmo serviço como uma origem adicional, sem tabela nova.
+As notificações do sino vão para `public.pendix_notificacoes`, que já existe
+no banco com `tipo`, `titulo`, `mensagem`, `canal`, `status`, `dados jsonb` e
+`chave_dedupe`. As faturas entram como `tipo` novo, usando a `chave_dedupe`
+existente (`fatura:<id>:<marco>`) para não duplicar aviso — a mesma máquina
+que já protege as notificações de pendência.
+
+> Correção: uma versão anterior desta spec afirmava que essa tabela não
+> existia. Era verdade sobre `supabase/migrations/` no repo, que está
+> desatualizado, e falso sobre o banco. Nove migrations aplicadas no projeto
+> não têm arquivo correspondente no repositório.
 
 ## Edge Functions
 
