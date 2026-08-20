@@ -5,6 +5,7 @@ import { useAccentColor, ACCENT_COLORS } from '../../app/theme/AccentColorProvid
 import { useEffect, useState } from 'react';
 import {
   LayoutDashboard, Users, Building2, ClipboardList, CalendarDays, History, Bell, Settings,
+  Wallet, Receipt,
   ChevronRight, LogOut, X,
 } from 'lucide-react';
 import { Toaster } from 'sonner';
@@ -18,16 +19,24 @@ const ROLE_LABEL: Record<string, string> = {
   acesso_completo: 'Acesso completo', visualizador: 'Visualizador',
 };
 
+// `escopo` decide quem enxerga o item:
+//   'todos'      — qualquer usuário logado
+//   'escritorio' — só quem NÃO está preso a uma empresa cliente
+//   'empresa'    — só o usuário de uma empresa cliente
+// O usuário da empresa não pode ver o financeiro do escritório inteiro: são
+// as mensalidades de todos os clientes dele.
 const NAV = [
-  { icon: LayoutDashboard, label: 'Dashboard',     path: '/pendix/app' },
-  { icon: Users,           label: 'Clientes',      path: '/pendix/app/clientes' },
-  { icon: Building2,       label: 'Empresas',      path: '/pendix/app/empresas' },
-  { icon: ClipboardList,   label: 'Pendências',    path: '/pendix/app/pendencias' },
-  { icon: CalendarDays,    label: 'Calendário',    path: '/pendix/app/calendario' },
-  { icon: History,         label: 'Histórico',     path: '/pendix/app/historico' },
-  { icon: Bell,            label: 'Notificações',  path: '/pendix/app/notificacoes' },
-  { icon: Settings,        label: 'Configurações', path: '/pendix/app/configuracoes' },
-];
+  { icon: LayoutDashboard, label: 'Dashboard',      path: '/pendix/app',                escopo: 'todos' },
+  { icon: Users,           label: 'Clientes',       path: '/pendix/app/clientes',       escopo: 'todos' },
+  { icon: Building2,       label: 'Empresas',       path: '/pendix/app/empresas',       escopo: 'todos' },
+  { icon: ClipboardList,   label: 'Pendências',     path: '/pendix/app/pendencias',     escopo: 'todos' },
+  { icon: CalendarDays,    label: 'Calendário',     path: '/pendix/app/calendario',     escopo: 'todos' },
+  { icon: Wallet,          label: 'Financeiro',     path: '/pendix/app/financeiro',     escopo: 'escritorio' },
+  { icon: Receipt,         label: 'Minhas faturas', path: '/pendix/app/minhas-faturas', escopo: 'empresa' },
+  { icon: History,         label: 'Histórico',      path: '/pendix/app/historico',      escopo: 'todos' },
+  { icon: Bell,            label: 'Notificações',   path: '/pendix/app/notificacoes',   escopo: 'todos' },
+  { icon: Settings,        label: 'Configurações',  path: '/pendix/app/configuracoes',  escopo: 'todos' },
+] as const;
 
 function usePendixMeta() {
   useEffect(() => {
@@ -92,7 +101,11 @@ export default function PendixRoot() {
       {/* Nav items */}
       <nav className="flex-1 px-3 pb-4 overflow-y-auto">
         <div className="space-y-1">
-          {NAV.map((item) => {
+          {NAV.filter((item) => {
+            if (item.escopo === 'escritorio') return !user?.companyId;
+            if (item.escopo === 'empresa') return !!user?.companyId;
+            return true;
+          }).map((item) => {
             const Icon = item.icon;
             const isActive = item.path === '/pendix/app'
               ? location.pathname === '/pendix/app'

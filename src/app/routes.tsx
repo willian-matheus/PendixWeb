@@ -16,7 +16,11 @@ const PendixCalendario = lazy(() => import("../pendix/pages/PendixCalendario"));
 const PendixHistorico = lazy(() => import("../pendix/pages/PendixHistorico"));
 const PendixNotificacoes = lazy(() => import("../pendix/pages/PendixNotificacoes"));
 const PendixConfiguracoes = lazy(() => import("../pendix/pages/PendixConfiguracoes"));
+const PendixFinanceiro = lazy(() => import("../pendix/pages/PendixFinanceiro"));
+const PendixMinhasFaturas = lazy(() => import("../pendix/pages/PendixMinhasFaturas"));
+const PendixBloqueado = lazy(() => import("../pendix/pages/PendixBloqueado"));
 import { RequirePendixAuth } from "../pendix/auth/RequirePendixAuth";
+import { RequireAdimplente } from "../pendix/auth/RequireAdimplente";
 
 const PageLoader = () => (
   <div className="min-h-screen flex items-center justify-center bg-[#06000f]">
@@ -89,6 +93,17 @@ export const router = createBrowserRouter([
     ),
   },
   {
+    path: "/pendix/bloqueado",
+    errorElement: <RouteErrorBoundary />,
+    element: (
+      <RequirePendixAuth>
+        <Suspense fallback={<PageLoader />}>
+          <PendixBloqueado />
+        </Suspense>
+      </RequirePendixAuth>
+    ),
+  },
+  {
     path: "/pendix/esqueci-senha",
     errorElement: <RouteErrorBoundary />,
     element: (
@@ -111,9 +126,11 @@ export const router = createBrowserRouter([
     errorElement: <RouteErrorBoundary />,
     element: (
       <RequirePendixAuth>
-        <Suspense fallback={<PageLoader />}>
-          <PendixRoot />
-        </Suspense>
+        <RequireAdimplente>
+          <Suspense fallback={<PageLoader />}>
+            <PendixRoot />
+          </Suspense>
+        </RequireAdimplente>
       </RequirePendixAuth>
     ),
     children: [
@@ -125,6 +142,8 @@ export const router = createBrowserRouter([
       { path: "calendario", element: <PendixCalendario /> },
       { path: "historico", element: <PendixHistorico /> },
       { path: "notificacoes", element: <PendixNotificacoes /> },
+      { path: "financeiro", element: <PendixFinanceiro /> },
+      { path: "minhas-faturas", element: <PendixMinhasFaturas /> },
       { path: "configuracoes", element: <PendixConfiguracoes /> },
     ],
   },
