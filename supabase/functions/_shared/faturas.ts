@@ -35,6 +35,22 @@ export function estaBloqueada(vencimento: Date, status: StatusFatura, hoje: Date
   return diasEntre(vencimento, hoje) >= CARENCIA_DIAS;
 }
 
+/** A empresa está bloqueada, dadas as faturas dela?
+ *
+ *  Basta uma fatura passada da carência. Existe separada de estaBloqueada()
+ *  para que a whatsapp-webhook — que precisa desta decisão mas fala com o
+ *  banco, e por isso não é testável — não carregue nenhuma regra própria.
+ *
+ *  `vencimento` chega como 'YYYY-MM-DD' porque é assim que sai do Postgres. */
+export function algumaFaturaBloqueia(
+  faturas: ReadonlyArray<{ vencimento: string; status: StatusFatura }>,
+  hoje: Date,
+): boolean {
+  return faturas.some((f) =>
+    estaBloqueada(new Date(`${f.vencimento}T12:00:00-03:00`), f.status, hoje),
+  );
+}
+
 const MARCOS: ReadonlyArray<readonly [string, number]> = [
   ['D-3', -3],
   ['D+0', 0],

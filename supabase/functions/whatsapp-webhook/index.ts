@@ -41,6 +41,7 @@
 //       (só texto simples, sem tools, sem estado — não cria nada sozinho).
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { algumaFaturaBloqueia } from '../_shared/faturas.ts';
 
 const STATUS_MAP: Record<string, string> = {
   SENT: 'enviada',
@@ -282,6 +283,51 @@ async function registrarTentativaEResponder(
     : mensagemBase;
 
   await enviarRespostaWhatsApp(telefoneRaw, mensagem);
+}
+
+/** A empresa do cliente está inadimplente além da carência?
+ *
+ *  ESTA FUNÇÃO É A TERCEIRA CAMADA DO BLOQUEIO, e a menos óbvia.
+ *
+ *  A whatsapp-webhook fala com o banco usando SUPABASE_SERVICE_ROLE_KEY, que
+ *  IGNORA RLS por completo. As policies de bloqueio da migration 0020 não
+ *  valem aqui. Sem esta checagem explícita, uma empresa bloqueada continua
+ *  enviando documento pelo WhatsApp — que é o caminho PRINCIPAL do Pendix,
+ *  não um caminho lateral. O bloqueio no front e no RLS seria teatro.
+ *
+ *  Lê pendix_faturas direto e delega a decisão a algumaFaturaBloqueia() de
+ *  _shared/faturas.ts — a mesma função pura que os testes cobrem — em vez de
+ *  chamar a RPC pendix_empresa_bloqueada. Assim a regra continua num lugar
+ *  só, esta função não carrega nenhuma lógica própria, e nada depende de
+ *  grant de EXECUTE para service_role.
+ *
+ *  Em caso de falha na consulta devolve `false`, deixando passar. Derrubar o
+ *  atendimento de todos os clientes por um erro de rede é pior do que deixar
+ *  passar um envio de inadimplente: a cobrança segue pelos outros canais, e
+ *  o alerta de D+3 continua saindo.
+ */
+async function empresaDoClienteBloqueada(
+  supabase: any,
+  empresaId: string | null,
+): Promise<boolean> {
+  if (!empresaId) return false; // cliente sem empresa vinculada não é cobrado
+
+  const hoje = new Date();
+  try {
+    const { data, error } = await supabase
+      .from('pendix_faturas')
+      .select('vencimento, status')
+      .eq('empresa_id', empresaId)
+      .in('status', ['aberta', 'vencida']);
+    if (error) {
+      console.error('whatsapp-webhook: falha ao checar adimplencia', error);
+      return false;
+    }
+    return algumaFaturaBloqueia(data ?? [], hoje);
+  } catch (e) {
+    console.error('whatsapp-webhook: erro ao checar adimplencia', e);
+    return false;
+  }
 }
 
 async function handleIdentificacaoFlow(
@@ -1355,12 +1401,29 @@ Deno.serve(async (req) => {
     const telefone = localPhoneDigits(payload.phone ?? '');
     const { data: clientes } = await supabase
       .from('pendix_clientes')
-      .select('id, escritorio_id, telefone, nome, email, telefone_verificado');
+      .select('id, escritorio_id, empresa_id, telefone, nome, email, telefone_verificado');
     const cliente = (clientes ?? []).find((c: any) => localPhoneDigits(c.telefone) === telefone);
 
     if (!cliente) {
       await handleIdentificacaoFlow(supabase, payload.phone ?? '', conteudo.texto);
       return new Response(JSON.stringify({ ok: true, mode: 'identificacao' }), { status: 200 });
+    }
+
+    // ── Bloqueio por inadimplência ──────────────────────────────────────
+    // Antes de baixar mídia de propósito: empresa bloqueada não deve nem
+    // consumir storage. Ver empresaDoClienteBloqueada() para por que a
+    // checagem precisa existir aqui e não só nas policies.
+    if (await empresaDoClienteBloqueada(supabase, cliente.empresa_id as string | null)) {
+      await enviarRespostaWhatsApp(
+        payload.phone ?? '',
+        'Seu acesso esta temporariamente suspenso porque a mensalidade esta em aberto. ' +
+          'Assim que o pagamento for confirmado, o envio de documentos volta ao normal. ' +
+          'Entre no sistema para ver a fatura e o link de pagamento.',
+      );
+      return new Response(
+        JSON.stringify({ ok: true, mode: 'bloqueado_inadimplencia' }),
+        { status: 200 },
+      );
     }
 
     let anexoPath: string | null = null;

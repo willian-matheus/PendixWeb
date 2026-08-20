@@ -22,16 +22,41 @@
 --   grep -rn "rpc('pendix_handle_new_user'\|rpc('pendix_is_admin'\|rpc('pendix_current_escritorio_id'" src/
 -- Em 2026-08-20 esse grep não retornava nada.
 
--- Função de trigger: ninguém deve poder chamá-la diretamente.
+-- Função de trigger: ninguém deve poder chamá-la diretamente. O Postgres a
+-- dispara como dono da tabela, então revogar de todos não afeta o cadastro.
 revoke execute on function public.pendix_handle_new_user() from public, anon, authenticated;
 
--- Helpers de RLS: usados DENTRO de policies, onde a revogação não se aplica.
--- O Postgres avalia a policy como o dono da tabela, então revogar aqui não
--- quebra nenhuma policy existente — só fecha a porta da API REST.
-revoke execute on function public.pendix_current_escritorio_id() from public, anon;
-revoke execute on function public.pendix_is_admin() from public, anon;
+-- ── ATENÇÃO: por que há grant depois do revoke ───────────────────────────
+--
+-- pendix_current_escritorio_id() e pendix_is_admin() são chamadas DENTRO das
+-- expressões de policy RLS de praticamente toda tabela pendix_*.
+--
+-- Expressão de policy é avaliada com os privilégios de QUEM FAZ A QUERY, não
+-- do dono da tabela. `security definer` muda o que a função enxerga por
+-- dentro; não muda quem pode chamá-la.
+--
+-- Em 2026-08-20 o ACL destas funções era:
+--   =X/postgres  anon=X/postgres  authenticated=X/postgres  service_role=X/postgres
+-- ou seja, `authenticated` tem grant EXPLÍCITO — não herdado do PUBLIC.
+-- Logo, `revoke from public, anon` sozinho já seria seguro aqui.
+--
+-- Os grants abaixo são defensivos, não corretivos: tornam a intenção
+-- explícita e mantêm a migration correta em qualquer ambiente onde o
+-- privilégio venha só por herança do PUBLIC, caso em que o revoke sem
+-- regrant quebraria toda leitura e escrita autenticada do app.
 
+revoke execute on function public.pendix_current_escritorio_id() from public, anon;
+grant  execute on function public.pendix_current_escritorio_id() to authenticated, service_role;
+
+revoke execute on function public.pendix_is_admin() from public, anon;
+grant  execute on function public.pendix_is_admin() to authenticated, service_role;
+
+-- ── VERIFICAÇÃO OBRIGATÓRIA APÓS APLICAR ─────────────────────────────────
+-- Logue no app como usuário comum e abra Pendências. Se a lista carregar,
+-- os grants estão certos. Se aparecer "permission denied for function",
+-- rode o rollback abaixo IMEDIATAMENTE.
+--
 -- ── ROLLBACK ─────────────────────────────────────────────────────────────
 -- grant execute on function public.pendix_handle_new_user() to anon, authenticated;
--- grant execute on function public.pendix_current_escritorio_id() to anon;
--- grant execute on function public.pendix_is_admin() to anon;
+-- grant execute on function public.pendix_current_escritorio_id() to public;
+-- grant execute on function public.pendix_is_admin() to public;

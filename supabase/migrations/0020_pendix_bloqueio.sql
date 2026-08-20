@@ -37,19 +37,31 @@ $$;
 
 -- ── Exposição das funções ────────────────────────────────────────────────
 --
--- O linter de segurança do Supabase já aponta funções `security definer`
--- deste projeto executáveis por `anon` via /rest/v1/rpc/. Não repetimos o
--- padrão: revogamos de todo mundo e devolvemos só a quem precisa.
+-- O linter de segurança do Supabase aponta funções `security definer` deste
+-- projeto executáveis por `anon` via /rest/v1/rpc/. Não repetimos o padrão:
+-- revogamos do PUBLIC e devolvemos explicitamente a quem precisa.
 --
--- pendix_empresa_bloqueada é chamada pelo front (RequireAdimplente) para o
--- usuário saber que está bloqueado, então vai para `authenticated`.
--- pendix_cliente_bloqueado só é usada dentro das policies e da
--- whatsapp-webhook (service role), então não é exposta a ninguém.
+-- DOIS CUIDADOS, e errar em qualquer um deles derruba o app inteiro:
+--
+-- 1. `revoke from public` tira o privilégio de todo papel que só o tinha por
+--    herança do PUBLIC — `authenticated` e `service_role` incluídos. Por
+--    isso cada grant abaixo é explícito.
+--
+-- 2. Expressão de policy RLS é avaliada com os privilégios de QUEM FAZ A
+--    QUERY, não do dono da tabela — `security definer` muda o que a função
+--    enxerga por dentro, não quem pode chamá-la. Como as policies de
+--    pendix_pendencias abaixo chamam pendix_cliente_bloqueado, o papel
+--    `authenticated` PRECISA de EXECUTE nela. Sem isso, todo insert de
+--    pendência falha com "permission denied for function" — para
+--    adimplentes e inadimplentes igualmente.
 
 revoke execute on function public.pendix_empresa_bloqueada(uuid) from public, anon;
-grant  execute on function public.pendix_empresa_bloqueada(uuid) to authenticated;
+grant  execute on function public.pendix_empresa_bloqueada(uuid) to authenticated, service_role;
 
-revoke execute on function public.pendix_cliente_bloqueado(uuid) from public, anon, authenticated;
+-- authenticated é obrigatório aqui: a policy de pendix_pendencias chama esta
+-- função. Não revogue de authenticated achando que "só as policies usam".
+revoke execute on function public.pendix_cliente_bloqueado(uuid) from public, anon;
+grant  execute on function public.pendix_cliente_bloqueado(uuid) to authenticated, service_role;
 
 -- ── Policies de escrita ──────────────────────────────────────────────────
 --
