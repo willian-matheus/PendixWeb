@@ -12,8 +12,16 @@
 
 ## Status em 2026-08-20
 
-Todo o código está escrito e commitado na branch `feat/cobranca-mercadopago`.
-39 testes passam (`npm test`) e o build passa (`npm run build`).
+Todo o código está escrito e commitado na branch `feat/cobranca-mercadopago`,
+incluindo a Task 8 (bloqueio no caminho do WhatsApp).
+45 testes passam (`npm test`) e o build passa (`npm run build`).
+
+Correção aplicada depois da escrita original deste plano: as migrations
+`0020` e `0022` ganharam `grant execute ... to authenticated, service_role`
+explícito. Expressão de policy RLS é avaliada com os privilégios de quem faz
+a query, então `authenticated` precisa de EXECUTE nas funções que a policy
+chama. Um `revoke from public` sem regrant quebraria todo insert de pendência
+com "permission denied for function".
 
 **Nada foi aplicado no Supabase.** Não há CLI nem Docker no ambiente onde o
 plano foi executado, e a permissão para escrever DDL no projeto remoto foi
