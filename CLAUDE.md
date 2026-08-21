@@ -13,9 +13,13 @@ npm run dev
 
 # Build for production
 npm run build
+
+# Run the pure-logic tests (Node, no browser)
+npm test
 ```
 
-Vite serves the frontend on port 5173. There is no lint or test command configured.
+Vite serves the frontend on port 5173. There is no lint command configured. `npm test` covers only
+`src/pendix/lib/*.test.ts` — the modules kept deliberately free of React/Supabase imports.
 
 ## Environment Variables
 
@@ -31,7 +35,7 @@ VITE_SUPABASE_ANON_KEY=
 PendixWeb is a standalone extraction of the "Pendix" module from the Flash20 project — a document-pendency tracker for accounting offices and their client companies. It is a single-backend React SPA:
 
 - React 18 + TypeScript, bundled with Vite
-- Routing: `react-router` v7 with lazy-loaded pages in `src/app/routes.tsx`. `/` redirects to `/pendix`.
+- Routing: `react-router` v7 with lazy-loaded pages in `src/app/routes.tsx`. `/` and `/pendix` both redirect to `/pendix/login`; the nine authenticated screens live under `/pendix/app`, behind `RequirePendixAuth`.
 - UI: Tailwind CSS v4 + Radix UI primitives (components in `src/app/components/ui/`)
 - `@` alias resolves to `src/`
 - **Supabase** (`src/app/services/supabase.ts`) is the only backend — auth and all CRUD go directly through the Supabase JS client. There is no local API server.
@@ -50,6 +54,7 @@ PendixWeb is a standalone extraction of the "Pendix" module from the Flash20 pro
 - **Pendix Cliente** = a client company of the escritório that owes recurring documents
 - **Documento Config** = a recurring document requirement per cliente (frequency, due day, priority)
 - **Pendência** = a single instance of a required document for a given competência (period), with a status lifecycle: `pendente` → `em_analise`/`recebido`/`rejeitado`/`cancelado`
+- **Periodicidade** = how often a pendência comes back (`unica`, `diaria`, `semanal`, `quinzenal`, `mensal`, `bimestral`, `trimestral`, `quadrimestral`, `semestral`, `anual`, `bienal`). The next occurrence is *not* pre-generated: it is created when the current one is marked `recebido` (`gerarProximaOcorrencia` in `src/pendix/services/pendix.ts`). `src/pendix/lib/periodicidade.ts` is a deliberate copy of `PendixApp/lib/periodicidade.ts` — the same pendência can be created here and closed on the phone, so both must agree on every date. Change one, mirror the other, the `periodicidade` CHECK in the DB, and the step list in `supabase/functions/whatsapp-webhook/index.ts`.
 - **Histórico** = an audit trail of actions taken on clientes/pendências
 
 ### State management

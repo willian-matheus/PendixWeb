@@ -16,7 +16,9 @@ const PendixCalendario = lazy(() => import("../pendix/pages/PendixCalendario"));
 const PendixHistorico = lazy(() => import("../pendix/pages/PendixHistorico"));
 const PendixNotificacoes = lazy(() => import("../pendix/pages/PendixNotificacoes"));
 const PendixConfiguracoes = lazy(() => import("../pendix/pages/PendixConfiguracoes"));
+const PendixAssinatura = lazy(() => import("../pendix/pages/PendixAssinatura"));
 import { RequirePendixAuth } from "../pendix/auth/RequirePendixAuth";
+import { RequireAssinatura } from "../pendix/auth/RequireAssinatura";
 
 const PageLoader = () => (
   <div className="min-h-screen flex items-center justify-center bg-[#06000f]">
@@ -111,9 +113,11 @@ export const router = createBrowserRouter([
     errorElement: <RouteErrorBoundary />,
     element: (
       <RequirePendixAuth>
-        <Suspense fallback={<PageLoader />}>
-          <PendixRoot />
-        </Suspense>
+        <RequireAssinatura>
+          <Suspense fallback={<PageLoader />}>
+            <PendixRoot />
+          </Suspense>
+        </RequireAssinatura>
       </RequirePendixAuth>
     ),
     children: [
@@ -126,6 +130,13 @@ export const router = createBrowserRouter([
       { path: "historico", element: <PendixHistorico /> },
       { path: "notificacoes", element: <PendixNotificacoes /> },
       { path: "configuracoes", element: <PendixConfiguracoes /> },
+      { path: "assinatura", element: <PendixAssinatura /> },
     ],
+  },
+  // Sem esta rota, uma URL digitada errado cai no ErrorBoundary padrão do
+  // React Router — a tela de desenvolvedor com "Hey developer 👋".
+  {
+    path: "*",
+    element: <RouteErrorBoundary />,
   },
 ]);

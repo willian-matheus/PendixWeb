@@ -12,6 +12,10 @@ import {
   type PendixPendencia, type PendixPendenciaStatus, type PendixCliente,
   type PendixPendenciaTipo, type PendixPrioridade,
 } from '../services/pendix';
+import {
+  PERIODICIDADE_OPTS, PERIODICIDADE_PADRAO, PERIODICIDADE_LABEL, PERIODICIDADE_DESCRICAO,
+  descreverPeriodicidade, ehRecorrente, type PendixPeriodicidade,
+} from '../lib/periodicidade';
 import { getPendixEmpresas, type PendixEmpresa } from '../services/empresas';
 import { supabase } from '../../app/services/supabase';
 import { useAuth } from '../../app/auth/AuthProvider';
@@ -61,6 +65,7 @@ const EMPTY_FORM = {
   descricao: '',
   prioridade: 'media' as PendixPrioridade,
   competencia: mesAtual(),
+  periodicidade: PERIODICIDADE_PADRAO as PendixPeriodicidade,
   dataVencimento: '',
   dataInicioCobranca: '',
   horarioNotificacao: '09:00',
@@ -244,6 +249,7 @@ export default function PendixPendencias() {
       descricao: p.descricao ?? '',
       prioridade: p.prioridade ?? 'media',
       competencia: p.competencia,
+      periodicidade: p.periodicidade ?? PERIODICIDADE_PADRAO,
       dataVencimento: p.data_limite ?? '',
       dataInicioCobranca: p.data_inicio_cobranca ?? '',
       horarioNotificacao: p.horario_notificacao?.slice(0, 5) || '09:00',
@@ -287,6 +293,7 @@ export default function PendixPendencias() {
         tipo: form.tipo,
         descricao: form.descricao || undefined,
         prioridade: form.prioridade,
+        periodicidade: form.periodicidade,
         data_inicio_cobranca: form.dataInicioCobranca || undefined,
         horario_notificacao: form.horarioNotificacao || '09:00',
         arquivo_modelo_nome: form.anexoNome || undefined,
@@ -474,6 +481,7 @@ export default function PendixPendencias() {
                   <p className={`text-xs truncate ${c.muted}`}>
                     {(p.pendix_clientes as any)?.nome ?? '—'} · {p.competencia}
                     {p.data_limite && ` · até ${p.data_limite}`}
+                    {descreverPeriodicidade(p.periodicidade) && ` · ${descreverPeriodicidade(p.periodicidade)}`}
                   </p>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
@@ -624,6 +632,22 @@ export default function PendixPendencias() {
                     className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.input}`}
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${c.label}`}>Periodicidade</label>
+                <select
+                  value={form.periodicidade}
+                  onChange={e => setForm(p => ({ ...p, periodicidade: e.target.value as PendixPeriodicidade }))}
+                  className={`w-full rounded-xl border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition ${c.select}`}
+                >
+                  {PERIODICIDADE_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+                <p className={`text-[10px] mt-1 ${c.muted}`}>
+                  {ehRecorrente(form.periodicidade)
+                    ? `${PERIODICIDADE_LABEL[form.periodicidade]} — ${PERIODICIDADE_DESCRICAO[form.periodicidade]}. Ao marcar como recebida, a próxima ocorrência é criada sozinha, com competência e datas já avançadas.`
+                    : 'A pendência acontece uma única vez — nada é criado depois que ela for recebida.'}
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">

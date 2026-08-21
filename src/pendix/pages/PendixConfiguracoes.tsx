@@ -5,6 +5,8 @@ import { useAccentColor, ACCENT_COLORS, type AccentColorId } from '../../app/the
 import { useAuth } from '../../app/auth/AuthProvider';
 import { supabase } from '../../app/services/supabase';
 import { toast } from 'sonner';
+import { Link } from 'react-router';
+import { getAssinatura, type PendixAssinatura } from '../services/assinatura';
 
 const CORES = (Object.keys(ACCENT_COLORS) as AccentColorId[]).map(id => ({ id, ...ACCENT_COLORS[id] }));
 
@@ -34,6 +36,11 @@ export default function PendixConfiguracoes() {
     supabase.from('usuarios').select('telefone').eq('id', user.id).maybeSingle()
       .then(({ data }) => setTelefone(data?.telefone ?? ''));
   }, [user?.id]);
+
+  // Assinatura do escritório: a chave de ativação e o ID da compra vivem aqui
+  // por exigência do requisito 9.1. A gestão em si é na tela de Assinatura.
+  const [assinatura, setAssinatura] = useState<PendixAssinatura | null>(null);
+  useEffect(() => { getAssinatura().then(setAssinatura).catch(() => setAssinatura(null)); }, []);
 
   const [senhaAtual, setSenhaAtual] = useState('');
   const [novaSenha, setNovaSenha] = useState('');
@@ -226,15 +233,28 @@ export default function PendixConfiguracoes() {
                   {plano}
                 </span>
               </div>
-              <p className={`text-xs mt-2 ${c.muted}`}>Renovação em 15/09/2026</p>
+              <p className={`text-xs mt-2 ${c.muted}`}>
+                {assinatura?.vencimento_em
+                  ? `Renovação em ${assinatura.vencimento_em.slice(0, 10).split('-').reverse().join('/')}`
+                  : 'Sem assinatura ativa'}
+              </p>
             </div>
+            {assinatura?.chave_ativacao && (
+              <div className={`rounded-xl border p-4 ${isDark ? 'bg-white/3 border-white/5' : 'bg-gray-50 border-gray-100'}`}>
+                <p className={`text-xs font-bold uppercase tracking-widest ${c.label}`}>Chave de ativação</p>
+                <p className="text-sm font-mono font-bold tracking-wider mt-1.5">{assinatura.chave_ativacao}</p>
+                {assinatura.ultimo_pagamento_id && (
+                  <p className={`text-[11px] mt-2 font-mono ${c.muted}`}>ID da compra: {assinatura.ultimo_pagamento_id}</p>
+                )}
+              </div>
+            )}
             <div className="flex gap-3">
-              <button
-                onClick={() => toast.info('Gestão de planos chega em breve.')}
-                className="flex-1 border border-purple-500/30 text-purple-400 hover:bg-purple-500/10 text-sm font-bold py-2.5 rounded-xl transition-colors"
+              <Link
+                to="/pendix/app/assinatura"
+                className="flex-1 flex items-center justify-center border border-purple-500/30 text-purple-400 hover:bg-purple-500/10 text-sm font-bold py-2.5 rounded-xl transition-colors"
               >
-                Alterar plano
-              </button>
+                {assinatura && assinatura.status !== 'sem_assinatura' ? 'Gerenciar assinatura' : 'Escolher plano'}
+              </Link>
               <button
                 onClick={() => signOut()}
                 className="flex-1 flex items-center justify-center gap-2 bg-red-600/15 text-red-400 hover:bg-red-600/25 border border-red-500/20 text-sm font-bold py-2.5 rounded-xl transition-colors"

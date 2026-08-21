@@ -13,6 +13,7 @@ import {
   type PendixPendencia, type PendixPendenciaStatus, type PendixHistoricoEntry,
 } from '../services/pendix';
 import { getPendixEmpresas, type PendixEmpresa } from '../services/empresas';
+import { PERIODICIDADE_LABEL, PERIODICIDADE_DESCRICAO, ehPeriodicidade } from '../lib/periodicidade';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -226,6 +227,14 @@ export default function PendixPendenciaDetalhe() {
               <div><p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${c.label}`}>Horário de notificação</p><p className="text-sm">{pendencia.horario_notificacao?.slice(0, 5) || '—'}</p></div>
               <div><p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${c.label}`}>Notificações extras</p><p className="text-sm">{pendencia.datas_notificacao?.length ? pendencia.datas_notificacao.join(', ') : '—'}</p></div>
               <div><p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${c.label}`}>Tipo</p><p className="text-sm capitalize">{pendencia.tipo === 'empresa' ? 'Empresa' : 'Cliente'}</p></div>
+              <div>
+                <p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${c.label}`}>Periodicidade</p>
+                <p className="text-sm">
+                  {ehPeriodicidade(pendencia.periodicidade)
+                    ? `${PERIODICIDADE_LABEL[pendencia.periodicidade]} — ${PERIODICIDADE_DESCRICAO[pendencia.periodicidade]}`
+                    : '—'}
+                </p>
+              </div>
             </div>
             {pendencia.descricao && (
               <div className="mt-4">

@@ -5,8 +5,7 @@ import { useAccentColor, ACCENT_COLORS } from '../../app/theme/AccentColorProvid
 import { useEffect, useState } from 'react';
 import {
   LayoutDashboard, Users, Building2, ClipboardList, CalendarDays, History, Bell, Settings,
-  ChevronRight, LogOut, X,
-} from 'lucide-react';
+  ChevronRight, LogOut, X, CreditCard,} from 'lucide-react';
 import { Toaster } from 'sonner';
 import Topbar from '../components/Topbar';
 import PendixLogo from '../components/PendixLogo';
@@ -26,6 +25,7 @@ const NAV = [
   { icon: CalendarDays,    label: 'Calendário',    path: '/pendix/app/calendario' },
   { icon: History,         label: 'Histórico',     path: '/pendix/app/historico' },
   { icon: Bell,            label: 'Notificações',  path: '/pendix/app/notificacoes' },
+  { icon: CreditCard,      label: 'Assinatura',    path: '/pendix/app/assinatura' },
   { icon: Settings,        label: 'Configurações', path: '/pendix/app/configuracoes' },
 ];
 

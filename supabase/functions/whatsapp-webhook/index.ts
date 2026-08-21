@@ -786,11 +786,16 @@ function pareceQuerNovaPendenciaExplicitamente(texto: string): boolean {
 
 type PassoId =
   | 'tipo' | 'selecionar_cliente' | 'titulo' | 'descricao' | 'prioridade' | 'competencia'
-  | 'data_limite' | 'data_inicio_cobranca' | 'horario_notificacao' | 'anexo' | 'observacao_interna' | 'confirmacao';
+  | 'periodicidade' | 'data_limite' | 'data_inicio_cobranca' | 'horario_notificacao'
+  | 'anexo' | 'observacao_interna' | 'confirmacao';
 
+// 'periodicidade' vem logo depois de 'competencia': é a pergunta "esse
+// documento volta?", e ela só faz sentido depois de saber de qual mês estamos
+// falando.
 const ORDEM_PASSOS: PassoId[] = [
   'tipo', 'selecionar_cliente', 'titulo', 'descricao', 'prioridade', 'competencia',
-  'data_limite', 'data_inicio_cobranca', 'horario_notificacao', 'anexo', 'observacao_interna', 'confirmacao',
+  'periodicidade', 'data_limite', 'data_inicio_cobranca', 'horario_notificacao',
+  'anexo', 'observacao_interna', 'confirmacao',
 ];
 
 interface DadosColeta {
@@ -801,6 +806,7 @@ interface DadosColeta {
   descricao?: string;
   prioridade?: 'baixa' | 'media' | 'alta' | 'urgente';
   competencia?: string;
+  periodicidade?: PendixPeriodicidade;
   data_limite?: string;
   data_inicio_cobranca?: string;
   horario_notificacao?: string;
@@ -815,6 +821,69 @@ interface EstadoColeta {
 }
 
 const PRIORIDADE_LABEL: Record<string, string> = { baixa: 'Baixa', media: 'Média', alta: 'Alta', urgente: 'Urgente' };
+
+// ── Periodicidade ───────────────────────────────────────────────────────────
+//
+// Mesma lista (e mesma ordem) de PendixApp/lib/periodicidade.ts e de
+// PendixWeb/src/pendix/lib/periodicidade.ts — a pendência criada por aqui tem
+// que ser indistinguível de uma criada na web ou no app. Mexeu numa, espelhe
+// nas outras e no CHECK de `periodicidade` no banco.
+
+type PendixPeriodicidade =
+  | 'unica' | 'diaria' | 'semanal' | 'quinzenal' | 'mensal' | 'bimestral'
+  | 'trimestral' | 'quadrimestral' | 'semestral' | 'anual' | 'bienal';
+
+const PERIODICIDADE_OPCOES: { value: PendixPeriodicidade; label: string; descricao: string }[] = [
+  { value: 'unica',         label: 'Única',         descricao: 'não repete' },
+  { value: 'diaria',        label: 'Diária',        descricao: 'todos os dias' },
+  { value: 'semanal',       label: 'Semanal',       descricao: 'a cada semana' },
+  { value: 'quinzenal',     label: 'Quinzenal',     descricao: 'a cada 15 dias' },
+  { value: 'mensal',        label: 'Mensal',        descricao: 'uma vez por mês' },
+  { value: 'bimestral',     label: 'Bimestral',     descricao: 'a cada 2 meses' },
+  { value: 'trimestral',    label: 'Trimestral',    descricao: 'a cada 3 meses' },
+  { value: 'quadrimestral', label: 'Quadrimestral', descricao: 'a cada 4 meses' },
+  { value: 'semestral',     label: 'Semestral',     descricao: 'a cada 6 meses' },
+  { value: 'anual',         label: 'Anual',         descricao: 'uma vez por ano' },
+  { value: 'bienal',        label: 'Bienal',        descricao: 'a cada 2 anos' },
+];
+
+const PERIODICIDADE_PADRAO: PendixPeriodicidade = 'unica';
+
+/**
+ * Aceita o número da lista ("5"), o nome ("mensal", "Mensal") ou como a pessoa
+ * costuma escrever no WhatsApp ("todo mês", "a cada 3 meses", "não repete").
+ * Devolve null quando não dá pra ter certeza — aí o passo é reenviado em vez
+ * de chutar uma recorrência que o escritório não pediu.
+ */
+function parsePeriodicidade(texto: string): PendixPeriodicidade | null {
+  const t = texto.trim().toLowerCase();
+  if (!t) return null;
+
+  const numero = t.match(/^(\d{1,2})$/);
+  if (numero) return PERIODICIDADE_OPCOES[Number(numero[1]) - 1]?.value ?? null;
+
+  const porNome = PERIODICIDADE_OPCOES.find(o => t.includes(o.value) || t.includes(o.label.toLowerCase()));
+  if (porNome) return porNome.value;
+
+  if (/(n[aã]o repete|uma [uú]nica vez|s[oó] uma vez|uma vez s[oó])/.test(t)) return 'unica';
+  if (/(todo dia|todos os dias|di[aá]ri)/.test(t)) return 'diaria';
+  if (/(toda semana|por semana|semanal)/.test(t)) return 'semanal';
+  if (/(15 dias|quinze dias|quinzen)/.test(t)) return 'quinzenal';
+  if (/(todo m[eê]s|por m[eê]s|mensal)/.test(t)) return 'mensal';
+  if (/(2 meses|dois meses)/.test(t)) return 'bimestral';
+  if (/(3 meses|tr[eê]s meses)/.test(t)) return 'trimestral';
+  if (/(4 meses|quatro meses)/.test(t)) return 'quadrimestral';
+  if (/(6 meses|seis meses)/.test(t)) return 'semestral';
+  if (/(todo ano|por ano|anual|1 ano|um ano)/.test(t)) return 'anual';
+  if (/(2 anos|dois anos)/.test(t)) return 'bienal';
+
+  return null;
+}
+
+function descreverPeriodicidade(p?: PendixPeriodicidade): string {
+  const o = PERIODICIDADE_OPCOES.find(x => x.value === (p ?? PERIODICIDADE_PADRAO));
+  return o ? `${o.label} (${o.descricao})` : 'Única (não repete)';
+}
 
 const MESES_PT: Record<string, string> = {
   janeiro: '01', fevereiro: '02', março: '03', marco: '03', abril: '04',
@@ -884,6 +953,7 @@ function resumoTexto(dados: DadosColeta, nomeCliente: string): string {
   if (dados.descricao) linhas.push(`Descrição: ${dados.descricao}`);
   linhas.push(`Prioridade: ${PRIORIDADE_LABEL[dados.prioridade ?? 'media']}`);
   linhas.push(`Competência: ${dados.competencia}`);
+  linhas.push(`Periodicidade: ${descreverPeriodicidade(dados.periodicidade)}`);
   if (dados.data_limite) linhas.push(`Vencimento: ${dados.data_limite}`);
   if (dados.data_inicio_cobranca) linhas.push(`Início da cobrança: ${dados.data_inicio_cobranca}`);
   linhas.push(`Horário de notificação: ${dados.horario_notificacao ?? '09:00 (padrão)'}`);
@@ -926,6 +996,15 @@ function mensagemDoPasso(
     case 'competencia':
       return {
         texto: 'Qual a *competência* (mês de referência)? Ex: agosto/2026 ou 2026-08. _(obrigatório para controle de pendências)_',
+        botoes: [],
+      };
+    case 'periodicidade':
+      // Sem botões de propósito: são 11 opções e o WhatsApp só mostra 3 —
+      // a lista numerada em texto é a única que cabe inteira.
+      return {
+        texto: 'Esse documento *se repete*? Responda com o número da opção:\n\n'
+          + PERIODICIDADE_OPCOES.map((o, i) => `${i + 1}) ${o.label} — ${o.descricao}`).join('\n')
+          + '\n\nSe repetir, cada vez que o documento for recebido a próxima cobrança nasce sozinha.',
         botoes: [],
       };
     case 'data_limite':
@@ -989,6 +1068,7 @@ async function criarPendenciaFinal(
     status: 'pendente',
     tipo: dados.tipo === 'empresa' ? 'empresa' : 'cliente',
     prioridade: dados.prioridade || 'media',
+    periodicidade: dados.periodicidade || PERIODICIDADE_PADRAO,
     requer_revisao_humana: true,
     origem: 'whatsapp',
   };
@@ -1123,6 +1203,15 @@ async function processarPassoColeta(
         return { ok: true };
       }
       dados.competencia = competencia;
+      break;
+    }
+    case 'periodicidade': {
+      const periodicidade = parsePeriodicidade(conteudoTexto);
+      if (!periodicidade) {
+        await reenviarPassoObrigatorio(supabase, sessionId, telefone, passo, dados, nomeCliente);
+        return { ok: true };
+      }
+      dados.periodicidade = periodicidade;
       break;
     }
     case 'data_limite': {

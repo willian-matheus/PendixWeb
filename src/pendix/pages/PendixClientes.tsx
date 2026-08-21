@@ -37,11 +37,20 @@ const PRIORIDADES: { value: PendixPrioridade; label: string }[] = [
   { value: 'alta', label: 'Alta' },
   { value: 'urgente', label: 'Urgente' },
 ];
+// Mesmo vocabulário da periodicidade da pendência (src/pendix/lib/periodicidade.ts),
+// com o "não repete" no nome que esta tabela usa desde a migration 0005 ('unico').
 const FREQ_OPTIONS: { value: PendixFrequencia; label: string }[] = [
-  { value: 'mensal', label: 'Mensal' },
-  { value: 'trimestral', label: 'Trimestral' },
-  { value: 'anual', label: 'Anual' },
-  { value: 'unico', label: 'Único' },
+  { value: 'unico', label: 'Único (não repete)' },
+  { value: 'diaria', label: 'Diária — todos os dias' },
+  { value: 'semanal', label: 'Semanal — a cada semana' },
+  { value: 'quinzenal', label: 'Quinzenal — a cada 15 dias' },
+  { value: 'mensal', label: 'Mensal — uma vez por mês' },
+  { value: 'bimestral', label: 'Bimestral — a cada 2 meses' },
+  { value: 'trimestral', label: 'Trimestral — a cada 3 meses' },
+  { value: 'quadrimestral', label: 'Quadrimestral — a cada 4 meses' },
+  { value: 'semestral', label: 'Semestral — a cada 6 meses' },
+  { value: 'anual', label: 'Anual — uma vez por ano' },
+  { value: 'bienal', label: 'Bienal — a cada 2 anos' },
 ];
 
 const STATUS_BADGE: Record<PendixClienteStatus, string> = {

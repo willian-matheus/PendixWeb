@@ -1,4 +1,10 @@
 import { supabase } from '../../app/services/supabase';
+import {
+  calcularProximaOcorrencia, ehRecorrente, inicioDaCobranca,
+  FREQUENCIA_COBRANCA_PADRAO, type PendixPeriodicidade,
+} from '../lib/periodicidade';
+
+export type { PendixPeriodicidade };
 
 function getSessionUser(): { officeId?: string; role?: string; nome?: string } | null {
   try { return JSON.parse(localStorage.getItem('flash_user') || 'null'); }
@@ -12,7 +18,7 @@ function isSuperAdmin(): boolean {
   const r = getSessionUser()?.role;
   return r === 'super_admin' || r === 'admin';
 }
-function sessionOfficeId(): string | null {
+export function sessionOfficeId(): string | null {
   return getImpersonatedOfficeId() || getSessionUser()?.officeId || null;
 }
 
@@ -34,7 +40,22 @@ export type PendixRegime = 'simples_nacional' | 'lucro_presumido' | 'lucro_real'
 // Schema compartilhado com o PendixApp (mobile) — ver supabase/migrations/0005_pendix_app_schema.sql
 export type PendixPendenciaStatus = 'pendente' | 'em_analise' | 'recebido' | 'rejeitado' | 'cancelado';
 export type PendixNivelCobranca = 'amigavel' | 'lembrete' | 'urgente' | 'critico';
-export type PendixFrequencia = 'mensal' | 'trimestral' | 'anual' | 'unico';
+// Frequência do documento recorrente configurado no cliente
+// (pendix_documentos_config). Mesmo vocabulário da `periodicidade` da
+// pendência — ver src/pendix/lib/periodicidade.ts — só que aqui o "não repete"
+// se chama 'unico' (nome herdado da migration 0005) em vez de 'unica'.
+export type PendixFrequencia =
+  | 'unico'
+  | 'diaria'
+  | 'semanal'
+  | 'quinzenal'
+  | 'mensal'
+  | 'bimestral'
+  | 'trimestral'
+  | 'quadrimestral'
+  | 'semestral'
+  | 'anual'
+  | 'bienal';
 export type PendixPrioridade = 'baixa' | 'media' | 'alta' | 'urgente';
 export type PendixPendenciaTipo = 'cliente' | 'empresa';
 
@@ -97,6 +118,12 @@ export interface PendixPendencia {
   datas_notificacao?: string[];
   datas_notificacao_enviadas?: string[];
   horario_notificacao?: string;
+  /** De quanto em quanto tempo a pendência renasce. 'unica' = evento único. */
+  periodicidade?: PendixPeriodicidade;
+  /** Pendência que originou esta ocorrência (null quando foi criada à mão). */
+  recorrencia_pai_id?: string | null;
+  cobranca_automatica?: boolean;
+  cobranca_frequencia?: PendixPeriodicidade;
   created_at: string;
   updated_at: string;
   pendix_clientes?: { nome: string; telefone?: string; empresa_id?: string | null; pendix_empresas?: { id: string; nome: string; telefone?: string; email?: string } | null };
@@ -259,6 +286,78 @@ export async function updatePendixPendenciaStatus(
   if (eid) q = q.eq('escritorio_id', eid);
   const { data, error } = await q.select('*, pendix_clientes(nome, telefone, empresa_id, pendix_empresas(id, nome, telefone, email))').single();
   if (error) throw error;
+  const atualizada = data as PendixPendencia;
+
+  // Fechou o ciclo de uma recorrente → abre o próximo. Best-effort: se falhar,
+  // o documento continua marcado como recebido (o que o usuário pediu) e a
+  // próxima ocorrência pode ser gerada de novo no próximo "recebido" ou à mão.
+  if (status === 'recebido') {
+    try {
+      await gerarProximaOcorrencia(atualizada);
+    } catch (err) {
+      console.warn('[Pendências] Falha ao gerar a próxima ocorrência:', err);
+    }
+  }
+
+  return atualizada;
+}
+
+/**
+ * Cria a ocorrência seguinte de uma pendência recorrente, copiando o que
+ * define o "molde" (cliente, documento, prioridade, anexo de exemplo) e
+ * avançando as datas conforme a periodicidade.
+ *
+ * Devolve `null` quando não há o que gerar: pendência única, ou uma sucessora
+ * que já existe. O índice único em `recorrencia_pai_id` é quem realmente
+ * garante isso — a checagem antes é só para evitar o round-trip inútil, e a
+ * violação (23505) é tratada como "outro já gerou", não como erro. É o mesmo
+ * caminho do PendixApp (services/pendix.ts): quem fecha o ciclo abre o próximo,
+ * não importa se foi pela web ou pelo celular.
+ */
+export async function gerarProximaOcorrencia(p: PendixPendencia): Promise<PendixPendencia | null> {
+  if (!ehRecorrente(p.periodicidade)) return null;
+
+  const proxima = calcularProximaOcorrencia(p);
+  if (!proxima) return null;
+
+  const { data: existente, error: errExistente } = await supabase
+    .from('pendix_pendencias').select('id').eq('recorrencia_pai_id', p.id).maybeSingle();
+  if (errExistente) throw errExistente;
+  if (existente) return null;
+
+  const { data, error } = await supabase.from('pendix_pendencias').insert({
+    escritorio_id: p.escritorio_id,
+    cliente_id: p.cliente_id,
+    documento_id: p.documento_id ?? null,
+    nome_documento: p.nome_documento,
+    competencia: proxima.competencia,
+    status: 'pendente',
+    tipo: p.tipo ?? 'cliente',
+    descricao: p.descricao ?? null,
+    prioridade: p.prioridade ?? 'media',
+    data_limite: proxima.data_limite ?? null,
+    data_inicio_cobranca: proxima.data_inicio_cobranca ?? null,
+    horario_notificacao: p.horario_notificacao ?? '09:00',
+    datas_notificacao: proxima.datas_notificacao,
+    // `datas_notificacao_enviadas` fica vazia de propósito: o ciclo novo ainda
+    // não teve lembrete nenhum enviado.
+    arquivo_modelo_url: p.arquivo_modelo_url ?? null,
+    arquivo_modelo_nome: p.arquivo_modelo_nome ?? null,
+    origem: p.origem ?? 'manual',
+    periodicidade: p.periodicidade,
+    recorrencia_pai_id: p.id,
+    // O ciclo novo herda a configuração de cobrança, mas com o contador
+    // zerado: o teto de reenvios é por ocorrência, não por recorrência.
+    cobranca_automatica: p.cobranca_automatica ?? true,
+    cobranca_frequencia: p.cobranca_frequencia ?? FREQUENCIA_COBRANCA_PADRAO,
+    cobrancas_enviadas: 0,
+    proxima_cobranca_em: inicioDaCobranca(proxima),
+  }).select('*, pendix_clientes(nome, telefone, empresa_id)').single();
+
+  if (error) {
+    if ((error as { code?: string }).code === '23505') return null; // outro cliente já gerou
+    throw error;
+  }
   return data as PendixPendencia;
 }
 
@@ -268,7 +367,7 @@ export async function updatePendixPendenciaCampos(
     'cliente_id' | 'nome_documento' | 'competencia' | 'data_limite' | 'observacoes' |
     'tipo' | 'descricao' | 'prioridade' | 'data_inicio_cobranca' |
     'arquivo_modelo_url' | 'arquivo_modelo_nome' | 'datas_notificacao' |
-    'horario_notificacao'
+    'horario_notificacao' | 'periodicidade'
   >>
 ) {
   const { blocked, eid } = requireTenantScope();
@@ -315,6 +414,15 @@ export async function getPendixAnexoUrl(path: string, expiresInSeconds = 3600) {
   return data.signedUrl;
 }
 
+/**
+ * A frequência do documento configurado vira a periodicidade da pendência
+ * gerada — mesmo vocabulário, só o "não repete" muda de nome ('unico' na
+ * config, 'unica' na pendência).
+ */
+export function periodicidadeDoDocumento(f?: PendixFrequencia | null): PendixPeriodicidade {
+  return !f || f === 'unico' ? 'unica' : f;
+}
+
 export async function gerarPendenciasMes(clienteId: string, competencia: string) {
   const docs = await getPendixDocConfigs(clienteId);
   const ativas = docs.filter(d => d.ativo);
@@ -344,6 +452,7 @@ export async function gerarPendenciasMes(clienteId: string, competencia: string)
     competencia,
     status: 'pendente' as const,
     data_limite: `${ano}-${mes}-${String(doc.dia_limite).padStart(2, '0')}`,
+    periodicidade: periodicidadeDoDocumento(doc.frequencia),
   }));
 
   const { data, error } = await supabase.from('pendix_pendencias').insert(rows).select();
